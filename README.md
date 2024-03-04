@@ -6,7 +6,7 @@ Core functions: (also explained in 'ExampleCode.m')
 1. SolvePointingConstrainedControlProblem.m - Core function which implements the thruster pointing constrained control problem and solves is using a single shooting method. The constraint is illustrated in the figure below.
 
 <p align="center" width="100%">
-    <img width="50%" src="diagramConstraint.png"> 
+    <img width="50%" src="SphericalPointingConstraint2.png"> 
 </p>
 
 2. ConstrainedApproachTestCondition.m - Contains the initial conditions for various transfer types.

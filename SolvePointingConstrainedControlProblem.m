@@ -231,14 +231,6 @@ function trajOut = costFunction(lam0_guess,tspan, x0, xf,u_max,rho,constraint,dy
     end 
 end
 
-function [r,theta,phi] = CartesianToSpherical(vec)
-    x = vec(1); y = vec(2); z = vec(3);
-    rxy = sqrt(x^2 + y^2);
-    r = sqrt(x^2 + y^2 + z^2);
-    phi = atan(z/rxy);
-    theta = atan2(y,x);
-end
-
 % function v = uSpherical(phi,theta) 
 %     v = [cos(phi)*cos(theta);cos(phi)*sin(theta);sin(phi)]; 
 % end 

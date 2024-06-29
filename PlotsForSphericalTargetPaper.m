@@ -41,28 +41,30 @@ sol2degrhoLarge = SolvePointingConstrainedControlProblem(problemParameters,solve
 PlotSolution.summary(sol2degrhoLarge)
 
 % angle sweep to 60 deg
-angleSweep2To30LargeRho = SweepSolutions(sol2degrhoLarge,'Angle',[2:1:30]*pi/180);
-angleSweepTo40LargeRho = SweepSolutions(angleSweep2To30LargeRho(end),'Angle',[30:.5:40]*pi/180);
+angleSweep2To30LargeRho = SweepSolutions(sol2degrhoLarge,'Angle',[2:5:27,30]*pi/180);
+angleSweepTo40LargeRho = SweepSolutions(angleSweep2To30LargeRho(end),'Angle',[30:5:60]*pi/180);
 angleSweepTo60LargeRho = SweepSolutions(angleSweepTo40LargeRho(end),'Angle',[40:.5:60]*pi/180);
-angleSweepTo89LargeRho = SweepSolutions(angleSweepTo60LargeRho(end),'Angle',[60:1:89]*pi/180);
-angleSweepTo90LargeRho = SweepSolutions(angleSweepTo89LargeRho(end),'Angle',[89:1:90]*pi/180);
+angleSweepTo89LargeRho = SweepSolutions(angleSweepTo60LargeRho(end),'Angle',[60:5:89]*pi/180);
+angleSweepTo90LargeRho = SweepSolutions(angleSweepTo89LargeRho(end),'Angle',[89:3:90]*pi/180);
+angleSweepTo90LargeRho = SweepSolutions(angleSweepTo89LargeRho(end),'Angle',[89:.1:100]*pi/180);
+
+%% Get 40 and 60 Deg solutions
+sol40Deg = SweepSolutions(angleSweepTo40LargeRho(end),'rho',1e-4);
+sol60DegLargeRho = angleSweepTo60LargeRho(end);
+sol60DegLargeRho.constraint.alpha0 = 60*pi/180;
+sol60Deg = SweepSolutions(sol60DegLargeRho,'rho',1e-4);
 
 PlotSolution.Sweep(angleSweepTo40LargeRho,'Angle')
-constraint40DegRhoSweep = SweepSolutions(angleSweepTo60LargeRho(1),'rho',1e-4,true);
-PlotSolution.Sweep(constraint40DegRhoSweep,'rho')
 PlotSolution.Sweep(angleSweepTo60LargeRho,'Angle')
 PlotSolution.Sweep(angleSweepTo89LargeRho,'Angle')
 PlotSolution.Sweep(angleSweepTo89LargeRho(20:30),'Angle')
-
-constraint60DegRhoSweep = SweepSolutions(angleSweepTo89LargeRho(1),'rho',1e-4,true);
-constraint80DegRhoSweep = SweepSolutions(angleSweepTo89LargeRho(end-8),'rho',1e-4,true);
 
 constraint85DegRhoSweep = SweepSolutions(angleSweepTo89LargeRho(27),'rho',1e-4,true);
 PlotSolution.summary(constraint85DegRhoSweep(end))
 PlotSolution.Sweep(constraint85DegRhoSweep)
 
 PlotSolution.Sweep(angleSweepTo90LargeRho,'Angle')
-constraint90DegRhoSweep = SweepSolutions(angleSweepTo90LargeRho(end),'rho',1e-4,true);
+constraint90DegRhoSweep = SweepSolutions(angleSweepTo90MediumRho(end),'rho',1e-4,true);
 PlotSolution.Sweep(constraint90DegRhoSweep)
 PlotSolution.summary(constraint90DegRhoSweep(end))
 
@@ -74,6 +76,222 @@ constantConstraintAngleRhoSweep(3,1:numTraj) = constraint60DegRhoSweep(floor(lin
 constantConstraintAngleRhoSweep(4,1:numTraj) = constraint80DegRhoSweep(floor(linspace(1,min(numel(constraint80DegRhoSweep),numTraj),numTraj)));
 constantConstraintAngleRhoSweep(5,1:numTraj) = constraint85DegRhoSweep(floor(linspace(1,min(numel(constraint85DegRhoSweep),numTraj),numTraj)));
 constantConstraintAngleRhoSweep(6,1:numTraj) = constraint90DegRhoSweep(floor(linspace(1,min(numel(constraint90DegRhoSweep),numTraj),numTraj)));
+
+%% Comparison to direct method, constant angle constraint
+engineType = 2; % BIPROPELLANT
+[problemParameters, solverParameters] = ConstrainedApproachTestCondition(11,engineType);
+problemParameters.transferTime = 48;
+problemParameters.constraint.type = POINTING_CONSTRAINT_TYPE.ORIGIN_CONSTANT_ANGLE;
+problemParameters.constraint.alpha0 = 2*pi/180;
+
+CVX_Params = CW_RPO_TestCondition;
+CVX_Params = WriteOCP_ParamsToCVX(CVX_Params,problemParameters);
+CVX_Params.numSteps = 200;
+
+[eta, x, u] = OptimalApproachTrajCW(CVX_Params);
+CVX_SolUnconstrained = WriteCVX_SolStruct(x,eta,u,CVX_Params);
+PlotTrajectorySummary(eta,x,u,CVX_Params,figure);
+
+CVX_Params.thrustPointingConstraint.prevTraj = x; 
+CVX_Params.thrustPointingConstraint.prevControl = u;
+CVX_Params.thrustPointingConstraint.prevEta = eta;
+
+CVX_Params.thrustPointingConstraint.active = true;
+CVX_Params.thrustPointingConstraint.useLinearApprox = true; 
+CVX_Params.trustRegion.useTrustRegion = false;
+CVX_Params.trustRegion.eta = 0;
+
+time = linspace(0,CVX_Params.simTimeHours*3600,CVX_Params.numSteps);
+
+constraintAngle = 40*pi/180;
+CVX_Params.thrustPointingConstraint.angle = constraintAngle;
+iterTol = 1e-8;
+N=6;
+for ii = 1:N
+    fprintf('Starting iteration %d\n',ii)
+    CVX_Params.thrustPointingConstraint.prevTraj = x; 
+    CVX_Params.thrustPointingConstraint.prevControl = u;
+    CVX_Params.thrustPointingConstraint.prevEta = eta;
+    [eta, x, u] = OptimalApproachTrajCW(CVX_Params);
+    if max(vecnorm(CVX_Params.thrustPointingConstraint.prevTraj(1:3,:)-x(1:3,:))) < iterTol, break, end 
+    CVX_Params.trustRegion.useTrustRegion = true;
+end
+CVX_Sol40Deg = WriteCVX_SolStruct(x,eta,u,CVX_Params);
+
+constraintAngle = 60*pi/180;
+CVX_Params.thrustPointingConstraint.angle = constraintAngle;
+for ii = 1:N
+    fprintf('Starting iteration %d\n',ii)
+    CVX_Params.thrustPointingConstraint.prevTraj = x; 
+    CVX_Params.thrustPointingConstraint.prevControl = u;
+    CVX_Params.thrustPointingConstraint.prevEta = eta;
+    [eta, x, u] = OptimalApproachTrajCW(CVX_Params);
+    if max(vecnorm(CVX_Params.thrustPointingConstraint.prevTraj(1:3,:)-x(1:3,:))) < iterTol, break, end 
+end
+CVX_Sol60Deg = WriteCVX_SolStruct(x,eta,u,CVX_Params);
+
+constraintAngle = 70*pi/180;
+CVX_Params.thrustPointingConstraint.angle = constraintAngle;
+for ii = 1:N
+    fprintf('Starting iteration %d\n',ii)
+    CVX_Params.thrustPointingConstraint.prevTraj = x; 
+    CVX_Params.thrustPointingConstraint.prevControl = u;
+    CVX_Params.thrustPointingConstraint.prevEta = eta;
+    [eta, x, u] = OptimalApproachTrajCW(CVX_Params);
+    if max(vecnorm(CVX_Params.thrustPointingConstraint.prevTraj(1:3,:)-x(1:3,:))) < iterTol, break, end 
+end
+CVX_Sol70Deg = WriteCVX_SolStruct(x,eta,u,CVX_Params);
+
+constraintAngle = 80*pi/180;
+CVX_Params.thrustPointingConstraint.angle = constraintAngle;
+for ii = 1:N
+    fprintf('Starting iteration %d\n',ii)
+    CVX_Params.thrustPointingConstraint.prevTraj = x; 
+    CVX_Params.thrustPointingConstraint.prevControl = u;
+    CVX_Params.thrustPointingConstraint.prevEta = eta;
+    [eta, x, u] = OptimalApproachTrajCW(CVX_Params);
+    if max(vecnorm(CVX_Params.thrustPointingConstraint.prevTraj(1:3,:)-x(1:3,:))) < iterTol, break, end 
+end
+CVX_Sol80Deg = WriteCVX_SolStruct(x,eta,u,CVX_Params);
+
+%% Plots to include and comments. 
+% 40 degrees - requires out of plane acceleration to maintain constraint and full throttle,
+% not possible to compensate with an out of plane acceleration unless the
+% step size is very small. Results in the constraint being violated for a
+% small period (while the control sweeps through the target) and the
+% control stays mostly in plane. 
+
+% 60 degrees - Smaller violation of constraint as the single continuous
+% burn starts to split into two discrete burns.
+
+% 70 degrees - the final burn is split into two burns (in plane) which the
+% cvx method approximates well. As the constraint angle is increased beyond
+% this, more successsive approxiamtions are required for convergence. 
+    
+% 80 degrees - able to converge if you step through 70deg. The differing 
+
+alphaStr = ['alpha = ',num2str(angles(jj)),' deg'];
+[hFig1,hFig2,hFig3,hFig4,hFig5,hFig6] = CreateFigures(figVis, alphaStr);
+iterTol = 1e-8; % .1cm
+
+[eta, x, u] = OptimalApproachTrajCW(CVX_Params);
+N=6;
+for ii = 1:N
+    fprintf('Starting iteration %d\n',ii)
+    CVX_Params.thrustPointingConstraint.prevTraj = x; 
+    CVX_Params.thrustPointingConstraint.prevControl = u;
+    CVX_Params.thrustPointingConstraint.prevEta = eta;
+    [eta, x, u] = OptimalApproachTrajCW(CVX_Params);
+    
+    strName = ['Iter',num2str(ii)];
+    PlotTrajectorySummary(eta,x,u,CVX_Params,hFig1);
+    PlotTrajXY(time,x,hFig4,strName);
+    PlotThrustPointingConstraint(time, x,u,CVX_Params.thrustPointingConstraint.angle,CVX_Params.aMax, strName, hFig6);
+    PlotChangeInSolution(time,x,eta, CVX_Params,strName,hFig5);
+
+    if max(vecnorm(CVX_Params.thrustPointingConstraint.prevTraj(1:3,:)-x(1:3,:))) < iterTol
+        break            
+    end 
+
+end
+fprintf('Converged after %d iterations\n',ii)
+
+hfConvexComparison = figure(Name='ConvexComparison',Units='normalized',Position=[0.3175 0.2138 0.5813 0.6670]); 
+solution = constantConstraintAngleRhoSweep(2,end);
+% ii = ii+1; if ii==3, for jj=1:2, ax=subplot(2,2,jj); ax.ColorOrderIndex = ax.ColorOrderIndex + 1; xlabel('Time (s)'); end, end 
+ax1 = subplot(2,2,1); grid on; hold on; titles = {'Indirect x','Indirect y','Indirect z'};
+titles2 = {'Convex x','Convex y','Convex z'};
+solution.x(:,1:6) = solution.x(:,1:6)*1e3;
+for ii = 1:3, plot(solution.t,solution.x(:,ii),'-','LineWidth',1,'DisplayName',titles{ii}); 
+    ReduceColorOrderIndex(ax1); plot(time,CVX_Sol40Deg.x(:,ii),'--','LineWidth',2,'DisplayName',titles2{ii});
+end 
+title('Trajectory'); ylabel('Position (m)'); legend('show','Location','west'); xlabel('Time (s)');
+
+PlotSolution.ThrustProfile(solution, subplot(2,2,2),'Indirect');
+PlotSolution.ThrustProfile(CVX_Sol40Deg, subplot(2,2,2),'Convex40Deg',true);
+annotation("textarrow",[.79,.84],[.8,.8],'Color','r')
+legend('show','Location','south');
+% Plot mini box
+ax2 = axes('Position',[.64 .7 .15 .2]); box on; grid on; hold on;
+idx1 = find(solution.t>41,1); idx2 = find(solution.t>42.8,1);
+plot(solution.t(idx1:idx2), solution.throttle(idx1:idx2),'LineWidth',2)
+idx1 = find(time>41,1); idx2 = find(time>42.8,1);
+stairs(time(idx1:idx2), CVX_Sol40Deg.throttle(idx1:idx2),'LineWidth',2)
+
+ax3 = subplot(2,2,3:4); grid on; hold on; 
+throttleOn1 = solution.throttle > 0.1; 
+angsAll = 90-solution.phi*180/pi;
+angsAll(~throttleOn1) = 0;
+plot(solution.t,angsAll,'--','LineWidth',2.5);
+
+throttleOn2 = CVX_Sol40Deg.throttle > 0.1; 
+angs = CVX_Sol40Deg.thrustDirAngle;
+angs(~throttleOn2) = 0; 
+stairs(CVX_Sol40Deg.t,angs,'LineWidth',2)
+
+t1 = 44; t2 = 46;
+axes(ax3); rectangle('Position', [44, 5, 3, 40], 'EdgeColor', 'r', 'LineWidth', 2); 
+legend({'Indirect','Convex'});
+title('Plume angle from target');xlabel('Time (s)'); ylabel('Angle (deg)');
+% Plot mini box
+ax2 = axes('Position',[.4 .2 .3 .2]); box on; grid on; hold on;
+axes(ax2)
+idx1 = find(solution.t>t1,1); idx2 = find(solution.t>t2,1);
+plot(solution.t(idx1:idx2), angsAll(idx1:idx2),'--','LineWidth',2.5)
+idx1 = find(time>t1,1); idx2 = find(time>t2,1);
+stairs(time(idx1:idx2), angs(idx1:idx2),'LineWidth',2)
+
+% Compare z component of control vector
+hFigZComponent = figure('Name','ConvexControlZComponent'); grid on; hold on; 
+plot(solution.t,solution.uDir(:,3).*0.03,'LineWidth',2,'DisplayName','Indirect'); % 3m/s^2
+stairs([CVX_Sol40Deg.t, 48],[CVX_Sol40Deg.u(3,:), CVX_Sol40Deg.u(3,end)],'LineWidth',2,'DisplayName','Convex')
+ylim([-20e-3,1e-3]); legend('show',Location='north');
+xlabel('Time (s)'); ylabel('Acceleration (m/s^2)')
+t1 = 43; t2 = 49;
+ax2 = axes('Position',[.2 .2 .5 .5]); box on; grid on; hold on;
+idx1 = find(solution.t>t1,1); idx2 = find(solution.t>t2,1); if isempty(idx2),idx2 = numel(solution.t); end
+plot(solution.t(idx1:idx2),solution.uDir((idx1:idx2),3).*0.03,'LineWidth',2); % 3m/s^2
+hold on; idx1 = find(time>t1,1); idx2 = find(time>t2,1); if isempty(idx2),idx2 = numel(CVX_Sol40Deg.t); end
+axes(ax2); stairs([CVX_Sol40Deg.t(idx1:idx2), 48],[CVX_Sol40Deg.u(3,(idx1:idx2)), CVX_Sol40Deg.u(3,end)],'LineWidth',2)
+ylim([-2e-6,1e-6]);
+
+% Compare multiple convex and indirect methods
+hfConvexSweep = figure('Name','ConvexSweep'); grid on; hold on; ax1 = gca;
+xlabel('Time (s)'); ylabel('Angle (deg)');
+solutions = {UnconstrainedShortTimeRhoSweep(end), constantConstraintAngleRhoSweep(2,end),...
+    constantConstraintAngleRhoSweep(3,end), constantConstraintAngleRhoSweep(4,end)};
+convexSols = {CVX_SolUnconstrained, CVX_Sol40Deg, CVX_Sol60Deg, CVX_Sol80Deg};
+ax2 = axes('Position',[.34 .6 .25 .3]); box on; grid on; hold on;
+namesSol = {'Indirect Free','Indirect 40deg','Indirect 60deg','Indirect 80deg'};
+convexNames = {'Convex Free','Convex 40deg','Convex 60deg','Convex 80deg'};
+for ii = 1:4
+    solution = solutions{ii};
+    CVX_Sol = convexSols{ii};
+    
+    throttleOn1 = solution.throttle > 0.1; 
+    angsAll = 90-solution.phi*180/pi;
+    angsAll(~throttleOn1) = 0;
+    axes(ax1);
+    plot(solution.t,angsAll,'--','LineWidth',2,'DisplayName',namesSol{ii});
+    ReduceColorOrderIndex(gca)
+    throttleOn2 = CVX_Sol.throttle > 0.1; 
+    angs = CVX_Sol.thrustDirAngle;
+    angs(~throttleOn2) = 0; 
+    stairs(CVX_Sol.t,angs,'LineWidth',1,'DisplayName',convexNames{ii})
+
+    axes(ax2); 
+    t1 = 1; t2 = 8;
+    idx1 = find(solution.t>t1,1); idx2 = find(solution.t>t2,1);
+    plot(solution.t(idx1:idx2), angsAll(idx1:idx2),'--','LineWidth',2)
+    idx1 = find(CVX_Sol.t>t1,1); idx2 = find(CVX_Sol.t>t2,1);
+    ReduceColorOrderIndex(ax2);
+    stairs(CVX_Sol.t(idx1:idx2), angs(idx1:idx2),'LineWidth',1)
+end 
+
+ylim([145,160]);
+axes(ax1); legend('show'); 
+rectangle('Position', [1, 140, 7, 25], 'EdgeColor', 'r', 'LineWidth', 2); 
+axes(ax2);
 
 %% Spherical constraint
 problemParameters.constraint.type = POINTING_CONSTRAINT_TYPE.ORIGIN_VARIABLE_ANGLE;
@@ -126,8 +344,11 @@ testR4 = SweepSolutions(sphericalTargetRadiusSweepLargestRho(end),'Radius',[3.9:
 sphericalR3_9_rhoSweep = SweepSolutions(testR4(1),'rho',1e-4);
 sphericalR4_rhoFinal = SweepSolutions(sphericalTargetRadius3_9_RhoSweep(end),'Radius',[3.95:.01:3.97,3.975:.005:3.995]/1000);
 
-
 %% PLOTS IN PAPER
+saveFigFcn(hfConvexSweep,saveDir);
+saveFigFcn(hfConvexComparison,saveDir);
+saveFigFcn(hFigZComponent,saveDir);
+
 hf1 = PlotSolution.summaryShort(UnconstrainedShortTimeRhoSweep(end));
 hf1.Position=[1000         812         870         525];
 hf1.Children(1).Position = [ 0.750070859456635   0.408698781838317   0.142528735632184   0.036190476190476];
@@ -139,7 +360,6 @@ ax = gca;grid on; hold on;
 solution = UnconstrainedShortTimeRhoSweep(end);
 solution.x(:,1:6)=solution.x(:,1:6)*1e3;
 plot3(solution.x(:,1), solution.x(:,2), solution.x(:,3), 'LineWidth',2, 'DisplayName',['Unconstrained']);  
-title('Optimal approach trajectories and engine plume directions')
 PlotSolution.addThrustDirection(solution,gca,true)
 for ii = [2,3,4,6]
     sol = constantConstraintAngleRhoSweep(ii,end);
@@ -173,18 +393,18 @@ saveFigFcn(hf3,saveDir)
 
 hf4 = figure(Name='hyperbolicsmoothing');
 for solution = constantConstraintAngleRhoSweep(4,[1,3,5,9,12])
-    PlotSolution.ThrustProfile(solution,gca);
+    PlotSolution.ThrustProfile(solution,gca,['\rho=',num2str(solution.rho)]);
 end
 summary = GetSolutionSummary(solution);
-title(['Throttle profile versus time for ',summary.constraintString, ' decreasing \rho']);
-xlabel('Time (s)'); ylabel('Throttle \delta^*')
+xlabel('Time (s)'); ylabel('Throttle \delta^*'); title('');
+legend('show','Location','best')
 saveFigFcn(hf4,saveDir)
 
 hf5 = figure("Name",'masscons');
 for solution = [UnconstrainedShortTimeRhoSweep(end),constantConstraintAngleRhoSweep([2,3,4,6],end)']
     PlotSolution.MassConsumption(solution,gca);
 end
-xlabel('Time (s)')
+xlabel('Time (s)'); title('');
 saveFigFcn(hf5,saveDir)
 
 hf6 = figure("Name",'constraintConeActive');
@@ -202,9 +422,9 @@ ax = gca; ax.View = [45  20];
 t = gcf; 
 %t.Children(1).Location = 'northoutside';
 t.Children(1).Label.String = 'Time (s)';
-title('Fuel optimal trajectory and engine plume directions for \alpha = 40 deg')
+% title('Fuel optimal trajectory and engine plume directions for \alpha = 40 deg')
 t.Position = [882         548        1152         603];
-legend('show','Location','best')
+legend('show','Location','best'); 
 saveFigFcn(hf6,saveDir)
 
 hf7 = figure(Name='fuelConsumption'); grid on; hold on; 
@@ -214,15 +434,16 @@ for solution = [UnconstrainedShortTimeRhoSweep(end),constantConstraintAngleRhoSw
     fuelConsumption(ii) = -(solution.x(end,7)-solution.x(1,7))*1e3;
 end
 plot(constraintAngles,fuelConsumption,'-*','LineWidth',2);
-xlabel('Constraint Angle (degrees)'); ylabel('Mass (g)')
-title('Total fuel consumption versus thruster constraint angle')
+xlabel('Constraint Angle (degrees)'); ylabel('Fuel consumption (g)')
+% title('Total fuel consumption versus thruster constraint angle')
 saveFigFcn(hf7,saveDir)
 
 %% Spherical plots
 hsph1 = figure(Name='targetrad3_9'); ii = 0;
-for sol = [sphericalTargetRadius2_RhoSweep(end), sphericalTargetRadius3_9_RhoSweep(end)]
+for sol = [sphericalTargetRadius2_RhoSweep(end), sphericalTargetRadius2_RhoSweep(end), ...
+        sphericalTargetRadius3_9_RhoSweep(end),sphericalTargetRadius3_9_RhoSweep(end)]
     ii = ii+1;
-    ax = subplot(1,2,ii); grid on; hold on; 
+    ax = subplot(2,2,ii); grid on; hold on; 
     sol.x(:,1:6)=sol.x(:,1:6)*1e3;
     plot3(sol.x(:,1),sol.x(:,2), sol.x(:,3), ...
        'LineWidth',2, 'DisplayName','Trajectory'); 
@@ -237,15 +458,25 @@ for sol = [sphericalTargetRadius2_RhoSweep(end), sphericalTargetRadius3_9_RhoSwe
     title([num2str(sol.problemParameters.constraint.targetRadius*1e3),'m spherical target constraint']);
     if ii == 1
         t = gcf; 
-        ax.View = [45  20];
-        %t.Children(1).Location = 'northoutside';
+        ax.View = [4.8,6.2];
+        t.Children(1).Location = 'southoutside';
         t.Children(1).Label.String = 'Time (s)';
-        t.Position = [882         548        1152         603];
+        t.Position = [ 1020         157        1152         971];
         legend('show','Location','best')
+        title(['                                                                                                  ',ax.Title.String]);
     else 
         delete(t.Children(1));
-        ax.View = [7.9356   18.6533];
+        ax.View = [ 109.9010   26.9764];
     end
+    if ii==2
+        ax.View = [101.8663   42.5437];
+        title('');
+    elseif ii==3
+        ax.View = [11,10];
+        title(['                                                                                                  ',ax.Title.String]);
+    elseif ii==4
+        title('')
+    end 
 end
 saveFigFcn(hsph1,saveDir)
 
@@ -259,8 +490,8 @@ end
 plot(targetRadii,fuelConsumption,'-*','LineWidth',2,'DisplayName','Spherical Pointing Constraint');
 massConsumptionUnconstrained = (UnconstrainedShortTimeRhoSweep(end).x(1,7)-UnconstrainedShortTimeRhoSweep(end).x(end,7))*1e3;
 plot(   targetRadii([1,ii]),ones(2,1)*massConsumptionUnconstrained,'r-','LineWidth',1,'DisplayName','Unconstrained');
-xlabel('Target Radius (m)'); ylabel('Mass (g)')
-title('Total fuel consumption versus target radius pointing constraint')
+xlabel('Target Radius (m)'); ylabel('Fuel consumption (g)')
+% title('Total fuel consumption versus target radius pointing constraint')
 legend('show','Location','best')
 saveFigFcn(hsph2,saveDir)
 
@@ -278,341 +509,28 @@ for solution = [UnconstrainedShortTimeRhoSweep(end),sphericalTargetSmallRadiusSw
     ii = ii +1;
 end
 close(fig2); axes(ax1); legend('show','Location','best'); xlabel('Time (s)')
+title(''); ylabel('\phi^{*}, polar angle from target (deg)')
 saveFigFcn(hsph3,saveDir)
 
-hsph3 = figure(Name='variousRPOD_Trajectories');
+hsph4 = figure(Name='CostatesAndSwitchFunction',Units='pixels',Position=[476 432 708 434]);
+for solution = [UnconstrainedShortTimeRhoSweep(end),sphericalTargetSmallRadiusSweepSmallRho(end,5),sphericalTargetRadiusSweepSmallRho(end,10),...
+        sphericalR4_rhoFinal([1,10])]%sphericalTargetRadius3_9_RhoSweep(end),sphericalTargetRadius3_9_RhoSweep(end)]
+    PlotSolution.CostatesSwitchFunction(solution)
+end
+saveFigFcn(hsph4,saveDir)
 
-% %% Transfer time sweep
-% transferTimes = 48:5:203; 
-% 
-% timeSweep = SweepSolutions(solution,'Time',transferTimes);
-% results = load("Results/CW_ConstrainedRPO/Bipropellant/unconstrainedTOF_timeSweep48To198_LargeRho.mat");
-% timeSweep = results.timeSweep;
-% PlotSolution.Sweep(timeSweep);
-% 
-% %% Sweep the longest one to finalRho = 1e-3;
-% unconstrainedFinalRho = SweepSolutions(timeSweep(end),'rho',1e-3);
-% PlotSolution.Sweep(unconstrainedFinalRho);
-% 
-% unconstrainedFinalRhoShortTime = SweepSolutions(timeSweep(1),'rho',1e-3);
-% PlotSolution.Sweep(unconstrainedFinalRhoShortTime);
-% 
-% save('unconstrainedTOF_48sec_rhoSweep',"unconstrainedFinalRhoShortTime")
-% save('unconstrainedTOF_198sec_rhoSweep',"unconstrainedFinalRho")
-% save('unconstrainedTOF_timeSweep48To198_LargeRho',"timeSweep")
-% 
-% % Load results
-% results = load("Results/CW_ConstrainedRPO/Bipropellant/unconstrainedTOF_198sec_rhoSweep.mat");
-% unconstrainedFinalRho = results.unconstrainedFinalRho;
-% 
-% results = load("Results/CW_ConstrainedRPO/Bipropellant/unconstrainedTOF_48sec_rhoSweep.mat");
-% unconstrainedFinalRhoShortTime = results.unconstrainedFinalRhoShortTime;
-% PlotSolution.summaryShort(unconstrainedFinalRhoShortTime(end))
-% for ii = 2:4, subplot(2,2,ii); xlabel('Time (sec)'); end 
-% 
-% RerunSolution(unconstrainedFinalRhoShortTime(1))
-% 
-% %% Linear HCW dynamics with constant constraint angle of 45 degrees
-% % [problemParameters, solverParameters] = ConstrainedApproachTestCondition(12);
-% % Use problem from above
-% 
-% % Add constraint angle of 15deg
-% solverParameters = unconstrainedFinalRho(1).solverParameters;
-% problemParameters = unconstrainedFinalRho(1).problemParameters;
-% solverParameters.rho = 0.5; 
-% problemParameters.constraint.type = POINTING_CONSTRAINT_TYPE.ORIGIN_CONSTANT_ANGLE;
-% problemParameters.constraint.alpha0 = 2*pi/180;
-% sol2degrhoLarge = SolvePointingConstrainedControlProblem(problemParameters,solverParameters);
-% PlotSolution.summary(sol2degrhoLarge)
-% 
-% % angle sweep to 30 deg
-% angleSweep2To30LargeRho = SweepSolutions(sol2degrhoLarge,'Angle',[2:1:30]*pi/180);
-% PlotSolution.Sweep(angleSweep2To30LargeRho,'Angle')
-% 
-% % Try Angle sweep to 40 deg. Got to 29. 
-% initAngle = angleSweep2To30LargeRho(end).problemParameters.constraint.alpha0*180/pi;
-% angleSweep30To40LargeRho = SweepSolutions(angleSweep2To30LargeRho(end),'Angle', [initAngle:.1:40]*pi/180);
-% results = load("Results/CW_ConstrainedRPO/Bipropellant/constantAngleTOF_198sec_angleSweep30To40LargeRho.mat");
-% angleSweep28To39LargeRho = results.newSols;
-% PlotSolution.Sweep(angleSweep28To31LargeRho,'Angle')
-% 
-% % Sweep a few of these to finalRho
-% idxsToSweep = 1:5:30; N = numel(idxsToSweep);
-% for ii = 1:N
-%     sols = SweepSolutions(angleSweep2To30LargeRho(idxsToSweep(ii)),'rho',1e-3,false);
-%     N2 = numel(sols); idxsToKeep = floor(linspace(1,N2,20));
-%     constrainedSolRhoSweep(ii,1:20) = sols(idxsToKeep);
-% end
-% PlotSolution.Sweep(constrainedSolRhoSweep2(end,:),'rho')
-% PlotSolution.Sweep(constrainedSolRhoSweep2(3,:),'rho')
-% save('constantAngleTOF_48sec_23To28DegRhoSweep',"constrainedSolRhoSweep")
-% save('constantAngleTOF_198sec_2To30DegLargeRhoOnly',"angleSweep2To30LargeRho")
-% 
-% results = load("Results/CW_ConstrainedRPO/Bipropellant/constantAngleTOF_48sec_23To28DegRhoSweep.mat");
-% t = results.constrainedSolRhoSweep;
-% % Find non empty structs
-% sz = size(t); idxs = [];
-% for ii = 1:sz(1), jIdx = 0; for jj = 1:sz(2), if ~isempty(t(ii,jj).solutionFound), jIdx = jIdx + 1; idxs(ii,jIdx) = jj; end, end, end
-% constrainedSolRhoSweep=t;
-% % Plot 1! constraint angle of 28 deg 
-% constIdx = 6; 
-% solutionToPlot = constrainedSolRhoSweep(constIdx,idxs(constIdx,20));
-% PlotSolution.summaryShort(solutionToPlot); summary = GetSolutionSummary(solutionToPlot);
-% for ii = 3:4, subplot(2,2,ii); xlabel('Time (sec)'); end 
-% subplot(2,2,1:2); title(['Optimal trajectory, ',summary.constraintString])
-% 
-% % Plot 2! throttle profile
-% hf = figure; grid on; hold on; 
-% idxsToPlot = floor(linspace(1,19,7)); idxs(constIdx,1:20)
-% for ii = idxsToPlot    
-%     solution = constrainedSolRhoSweep(constIdx,idxs(constIdx,ii));
-%     plot(solution.t, solution.throttle, 'DisplayName',['\rho = ',num2str(solution.rho)]);
-% end 
-% xlabel('Time (sec)'); title(['Throttle profile vs \rho, ',summary.constraintString])
-% legend('show','Location','best')
-% 
-% % Plot 3! 
-% hf = figure; 
-% solution = unconstrainedFinalRhoShortTime(end); solution.x(:,1:6) = solution.x(:,1:6)*1e3;
-% subplot(2,2,1); grid on; hold on; plot3(solution.x(:,1), solution.x(:,2), solution.x(:,3), 'LineWidth',2, 'DisplayName',['alpha unconstrained']);  title('Optimal Trajectories')
-% PlotSolution.PlumeAngle(solution,subplot(2,2,2));
-% PlotSolution.SwitchFunction(solution,subplot(2,2,3));
-% PlotSolution.MassConsumption(solution,subplot(2,2,4));
-% finalRhoIdx = [25,48,29,20,20,20];
-% for ii = 1:6
-%     solStruct2Plot(ii) = constrainedSolRhoSweep(ii,idxs(ii,finalRhoIdx(ii)));
-% end 
-% PlotSolution.SweepShort(solStruct2Plot,'Angle',hf, true)
-% subplot(2,2,1); legend('hide'); for ii = 2:4, subplot(2,2,ii); xlabel('Time (sec)'); end 
-% 
-% 
-% % PlotSolution.SweepShort(constrainedSolRhoSweep(constIdx,idxs(constIdx,1:20)),'rho')
-% % PlotSolution.SweepShort(constrainedSolRhoSweep(3,idxs(3,20:25)),'rho')
-% % 
-% % constIdx = 1; PlotSolution.SweepShort(sol2Plot,'rho'); 
-% 
-% 
-% %% Spherical Constraints
-% % Plot the constraint angle vs time to get an idea of what the sphere should be
-% hfConstraintAngleFig = figure; grid on; hold on; 
-% for targetRad = [.5, 1, 1.5, 2]
-%     problemParameters = UpdateSphereCircleRadius(problemParameters,targetRad);
-%     N=100; Rs = linspace(2,10,N); for ii=1:N, constraintAngVsDist(ii)= problemParameters.constraint.angleFunc(Rs(ii));end
-%     plot(Rs,constraintAngVsDist*180/pi,'DisplayName',['Radius ',num2str(targetRad)]);
-% end
-% xlabel('Distance from target (m)'); legend('show'); ylabel('Constraint angle (deg)'); title('Constraint angle for different spherical target radii')
-% 
-% % Set parameters from fixed constraint angle problem 
-% problemParameters = angleSweep28To39LargeRho(end).problemParameters;
-% solverParameters = angleSweep28To39LargeRho(end).solverParameters;
-% solverParameters.rho = 0.5; 
-% problemParameters.constraint.type = POINTING_CONSTRAINT_TYPE.ORIGIN_VARIABLE_ANGLE;
-% problemParameters = UpdateSphereCircleRadius(problemParameters,1.5/1000);
-% solution.solutionFound = false; 
-% solverParameters.initialCostateGuess = [angleSweep28To39LargeRho(end).newCostateGuess; rand(1,1)*1e-5];
-% problemParameters.dynamics.regularizationMethod = 'HyperbolicTangentSmoothing';
-% 
-% solR1_5_rhoLarge = SolvePointingConstrainedControlProblem(problemParameters,solverParameters);
-% PlotSolution.summary(solR1_5_rhoLarge)
-% rhoSweepRadius1_5 = SweepSolutions(solR2_rhoLargeRadius,'rho',1e-3,false);
-% PlotSolution.summary(rhoSweepRadius1_5(end))
-% 
-% % Now try with L2 norm regularization method Radius = 1
-% problemParameters.dynamics.regularizationMethod = 'L2_Norm';
-% solverParameters.rho = 0.1; 
-% problemParameters = UpdateSphereCircleRadius(problemParameters,1/1000);
-% solverParameters.initialCostateGuess = rhoSweepRadius1_5(end).newCostateGuess;
-% solR1_rhoLargeL2_NormSmoothing = SolvePointingConstrainedControlProblem(problemParameters,solverParameters);
-% rhoSweepR1_L2_NormSmoothing = SweepSolutions(solR1_rhoLargeL2_NormSmoothing,'rho',1e-3,false);
-% PlotSolution.Sweep(rhoSweepR1_L2_NormSmoothing);
-% 
-% % Radius sweep to 2
-% radiusSweep = SweepSolutions(solR1_rhoLargeL2_NormSmoothing,'Radius',[1:0.1:2]/1000,false);
-% PlotSolution.Sweep(radiusSweep);
-% 
-% % rho sweep R2
-% rhoSweepMediumRadius = SweepSolutions(radiusSweep(end),'rho',1e-4,false);
-% PlotSolution.Sweep(rhoSweepMediumRadius);
-% PlotSolution.summary(rhoSweepMediumRadius(end))
-% rhoSweepMediumRadiusSmallRho = SweepSolutions(rhoSweepMediumRadius(end),'rho',1e-4,false);
-% sols = [rhoSweepMediumRadius,rhoSweepMediumRadiusSmallRho];
-% PlotSolution.summary(rhoSweepMediumRadiusSmallRho(end))
-% 
-% save('sphericalTOF_198sec_radiusSweep_5To1_5_LargeRhoOnly',"radiusSweep")
-% save('sphericalTOF_198sec_rhoSweep_targetRadius1_5_SingularArc',"sols")
-% 
-% save('sphericalTOF_198sec_L2Norm_rhoSweep_targetRadius1_9_SingularArc',"rhoSweepMediumRadius")
-% save('sphericalTOF_198sec_L2Norm_LargeRho_RadiusSweep',"radiusSweep")
-% 
-% 
-% % This shows a singular arc!^ 
-% 
-% %% Try spherical with reduceed TOF
-% constIdx = 6; 
-% solutionToPlot = constrainedSolRhoSweep(constIdx,idxs(constIdx,20));
-% newSol = RerunSolution(solutionToPlot);
-% PlotSolution.summary(newSol)
-% problemParameters = newSol.problemParameters;
-% solverParameters = newSol.solverParameters;
-% problemParameters.constraint.type = POINTING_CONSTRAINT_TYPE.ORIGIN_VARIABLE_ANGLE;
-% problemParameters = UpdateSphereCircleRadius(problemParameters,0.5/1000);
-% solverParameters.initialCostateGuess = newSol.newCostateGuess;
-% solTOF48_rhoLargeRadius_5 = SolvePointingConstrainedControlProblem(problemParameters,solverParameters);
-% PlotSolution.summary(solTOF48_rhoLargeRadius_5);
-% 
-% problemParameters = constrainedSolRhoSweep2(end,1).problemParameters;
-% solverParameters = constrainedSolRhoSweep2(end,1).solverParameters;
-% problemParameters.constraint.type = POINTING_CONSTRAINT_TYPE.ORIGIN_VARIABLE_ANGLE;
-% problemParameters = UpdateSphereCircleRadius(problemParameters,0.5/1000);
-% 
-% solverParameters.initialCostateGuess = constrainedSolRhoSweep2(1).newCostateGuess;
-% solTOF48_rhoLargeRadius_5 = SolvePointingConstrainedControlProblem(problemParameters,solverParameters);
-% PlotSolution.summary(solTOF48_rhoLargeRadius_5)
-% solTOF48_rhoSmallRadius_5 = SweepSolutions(solTOF48_rhoLargeRadius_5,'rho',1e-3);
-% save('sphericalTOF_48sec_rhoSweepTargetRadius_0_5',"solTOF48_rhoSmallRadius_5")
-% 
-% results = load("Results/CW_ConstrainedRPO/Bipropellant/sphericalTOF_48sec_rhoSweepTargetRadius_0_5.mat");
-% solTOF48_rhoSmallRadius_5 = results.solTOF48_rhoSmallRadius_5;
-% 
-% PlotSolution.summary(constrainedSolRhoSweep2(1)); PlotSolution.summary(constrainedSolRhoSweep2(end))
-% PlotSolution.SweepShort(solTOF48_rhoSmallRadius_5)
-% PlotSolution.summaryShort(solTOF48_rhoSmallRadius_5(end))
-% for ii = 3:4, subplot(2,2,ii); xlabel('Time (sec)'); end 
-% 
-% 
-% % Another singular arc!
-% solTOF48_rhoLargeRadius_1_5;
-% solTOF48_rhoSmallRadius_1_5 = SweepSolutions(solTOF48_rhoLargeRadius_1_5,'rho',1e-3,false);
-% 
-% %% Ion engine solutions 
-% angleSweep = SweepSolutions(solution,'Angle',[15:.1:45]*pi/180);
-% PlotSolution.summary(newSols(1));
-% 
-% rhoSweep25Deg = SweepSolutions(newSols(20),'rho',1e-4);
-% rhoSweep30Deg = SweepSolutions(newSols(31),'rho',1e-4);
-% PlotSolution.Sweep(rhoSweep,'rho')
-% 
-% PlotSolution.Sweep(newSols,'angle')
-% 
-% rhoAngleSweep35 = SweepSolutions(newSols(21),'rhoAngle',[1e-3,40*pi/180],false);
-% PlotSolution.Sweep(rhoAngleSweep,'angle')
-% PlotSolution.summary(rhoAngleSweep(60))
-% 
-% rhoAngleSweep30Deg = SweepSolutions(rhoAngleSweep(80),'rho',1e-4);
-% PlotSolution.Sweep(rhoAngleSweep,'angle')
-% RerunSolution(rhoAngleSweep30Deg(end));
-% PlotSolution.summary(rhoSweep25Deg(end))
-% PlotSolution.summary(rhoAngleSweep30Deg(end))
-% 
-% % Try smaller alpha steps?
-% angleSweepto25_35 = SweepSolutions(newSols(21),'Angle',[25:.1:35]*pi/180);
-% 
-% % Try random guesses
-% solution = solutionUnconstrainedFinalRho(1);
-% solution.solutionFound = false; 
-% problemParameters = solution.problemParameters;
-% solverParameters = solution.solverParameters;
-% solverParameters.rho = 0.5; 
-% problemParameters.constraint.type = POINTING_CONSTRAINT_TYPE.ORIGIN_CONSTANT_ANGLE;
-% problemParameters.constraint.alpha0 = 45*pi/180;
-% iter = 0; iterMax = 100;
-% solverParameters.stateConvergeneTolerance = 1e-8;
-% while any(~(solution.solutionFound)) && iter<iterMax
-%     solverParameters.initialCostateGuess = [rand(3,1)/1e4;rand(3,1)/10];
-%     solution = SolvePointingConstrainedControlProblem(problemParameters,solverParameters);
-%     iter = iter+1;
-% end
-% PlotSolution.summary(solution);
-% 
-% rhoSweep45DegNew = SweepSolutions(solution,'rho',1e-3);
-% rhoSweep35Deg = SweepSolutions(solution,'rho',1e-3);
-% PlotSolution.Sweep(rhoSweep35Deg); 
-% PlotSolution.Sweep(rhoSweep35Deg(1:10)); 
-% 
-% rhoSweep35DegNoDynamicStepSize = SweepSolutions(solution,'rho',1e-3,false);
-% PlotSolution.Sweep(rhoSweep35DegNoDynamicStepSize); 
-% 
-% PlotSolution.summary(rhoSweep45Deg(end))
-% PlotSolution.Sweep(rhoSweep45Deg); 
-% rhoSweep45DegToSmallerRho = SweepSolutions(rhoSweep45Deg(end),'rho',1e-4);
-% PlotSolution.Sweep(rhoSweep45DegToSmallerRho); 
-% 
-% % IT CONVERGED!^^ Try 60 degrees for lolz
-% % Try increase 30deg constraint when rho =1e-3
-% angleSweep31DegFrom30DegFinalRho = SweepSolutions(rhoAngleSweep(20),'Angle',[27.25,30]*pi/180);
-% PlotSolution.Sweep(rhoAngleSweep,'angle')
-% angleSweepTo30DegMediumRho = SweepSolutions(rhoAngleSweep(20),'Angle',[27.25:0.2:35]*pi/180);
-% 
-% %% Linear HCW dynamics with spherical target of R = 2 
-% [problemParameters, solverParameters] = ConstrainedApproachTestCondition(14);
-% useExistingSolution = true; 
-% if useExistingSolution
-%     load('solutionSphericalCW_ApproachR2.mat');
-% else 
-%     solverParameters.initialCostateGuess = [0.072508101952911  -0.016008226036710  -0.000966157781467   1.270347522843222  -0.049121252997545  -0.006030148702710   rand(1,1)*1e-5]';
-%     solution = SolvePointingConstrainedControlProblem(problemParameters,solverParameters);
-%     while solverParameters.rho > solverParameters.finalRho 
-%         solverParameters.rho = solverParameters.rho*0.9;
-%         solverParameters.initialCostateGuess = solution.newCostateGuess;
-%         solution = SolvePointingConstrainedControlProblem(problemParameters,solverParameters);
-%     end 
-% end 
-% hfHCW_SphR2 = PlotSolution.summary(solution);
-% 
-% solverParameters.rho=solution.rho;
-% 
-% %% Linear HCW dynamics, trajectories approaching sphericalTarget
-% soution4 = solution; 
-% 
-% 
-% %% Extend to CRTBP dynamics and JWST orbit
-% 
-% % %% Constrained, spherical target R = 1; 
-% % [problemParameters, solverParameters] = ConstrainedApproachTestCondition(13);
-% % solverParameters.initialCostateGuess = [0.059946692386909  -0.005254239642207  -0.005254239729821   1.197573082530436  -0.014646044993121  -0.014646045237169]';
-% % solverParameters.rho = solverParameters.finalRho*10;
-% % solution = SolvePointingConstrainedControlProblem(problemParameters,solverParameters);
-% % PlotSolution.summary(solution)
-% % while solverParameters.rho > solverParameters.finalRho 
-% %     solverParameters.rho = solverParameters.rho*0.9;
-% %     solverParameters.initialCostateGuess = solution.newCostateGuess;
-% %     solution = SolvePointingConstrainedControlProblem(problemParameters,solverParameters);
-% % end 
-% 
-% %% SaveFigs
-% cd(saveDir); 
-% saveas(hf,'solSummaryToy_SphericalR1','fig'); saveas(hf,'solSummaryToy_SphericalR1','png'); 
-% saveas(hFig,'constraint','fig'); saveas(hFig,'constraint','png'); 
-% saveas(hfHCW_SphR2,'solSummaryCW_SphericalR2','fig'); saveas(hfHCW_SphR2,'solSummaryCW_SphericalR2','png'); 
-% cd(od);
-% 
-% %% Unconstrained trajectory WITH DYNAMICS
-% 
-% 
-% %% Constant angle 45degree trajectory with dynamics 
-% 
-% %% spherical target trajectory with dynamics
-% 
-% %% Toy dynamics, constrained problem
-% plotToyDynamics = false;
-% if plotToyDynamics
-%     useExistingSolution = true; 
-%     if useExistingSolution
-%         load("solutionSphericalApproachR1.mat");
-%         solverParameters.rho = solution.rho;
-%     else 
-%         solverParameters.rho = 0.5;
-%         solution.solutionFound = true;     
-%         solution.newCostateGuess = [0.059946692386909  -0.005254239642207  -0.005254239729821   1.197573082530436  -0.014646044993121  -0.014646045237169]';
-%         
-%         while solverParameters.rho > solverParameters.finalRho 
-%             solverParameters.rho = solverParameters.rho*0.9;
-%             solverParameters.initialCostateGuess = solution.newCostateGuess;
-%             solution = SolvePointingConstrainedControlProblem(problemParameters,solverParameters);
-%         end 
-%     end
-%     hf = figure('Units','normalized','Position',[ 0.3406    0.1762    0.6594    0.7047]);
-%     PlotSolution.summaryShort(solution,hf);
-% end
+% Print converged costates
+solsToDisplay=[RerunSolution(UnconstrainedShortTimeRhoSweep(end));
+    sol40Deg(end);
+    sol60Deg(end);
+constantConstraintAngleRhoSweep([4,6],end) ];
+solsToDisplay = RerunSolution(solsToDisplay); % Double check everything is converged
+PlotSolution.PrintConvergedCostates(solsToDisplay);
 
-end 
+solsToDisplay=[UnconstrainedShortTimeRhoSweep(end),...
+    sphericalTargetSmallRadiusSweepSmallRho(end,3),...
+    sphericalTargetRadiusSweepSmallRho(end,7),...
+        sphericalR4_rhoFinal([1,10]) ];
+solsToDisplay = RerunSolution(solsToDisplay); % Double check everything is converged
+PlotSolution.PrintConvergedCostates(solsToDisplay)
+

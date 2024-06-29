@@ -79,17 +79,32 @@ methods(Static)
         end
     end 
 
-    function hf = Costates(solution,figIn)
+    function hf = Costates(solution,axIn)
         if nargin < 2 
             hf = figure;
         else 
-            hf = figIn;
+            axes(axIn);
         end
         tits = {'\lambda_{r1}','\lambda_{r2}','\lambda_{r3}','\lambda_{v1}','\lambda_{v2}','\lambda_{v3}','\lambda_{m}'};
         for ii = 1:7
             subplot(4,2,ii);
             grid on; hold on;
             plot(solution.t,solution.x(:,ii+7)); title(tits{ii})
+            xlabel('Time (s)')
+        end
+    end
+
+    function hf = States(solution,figIn)
+        if nargin < 2 
+            hf = figure;
+        else 
+            hf = figIn;
+        end
+        tits = {'r_1','r_2','r_3','v_1','v_2','v_3','m'};
+        for ii = 1:7
+            subplot(4,2,ii);
+            grid on; hold on;
+            plot(solution.t,solution.x(:,ii)); title(tits{ii})
             xlabel('Time (s)')
         end
     end
@@ -248,13 +263,22 @@ methods(Static)
             'g \rightarrow'],'Color',t(ax.ColorOrderIndex-1,:),'FontSize',12,'HorizontalAlignment','right');
     end 
 
-    function ThrustProfile(solution,ax,legStr)
+    function ThrustProfile(solution,ax,legStr,convex)
         if nargin < 3 
             legStr = 'Throttle';
         end
+        if nargin < 4
+            convex = false; 
+        end
+        if convex
+            plotFunc = @stairs;
+            legStr = 'Convex';
+        else 
+            plotFunc = @plot;
+        end 
         axes(ax); grid on; hold on; 
         title('Throttle')
-        plot(solution.t, solution.throttle,'LineWidth',2, 'DisplayName',legStr);
+        plotFunc(solution.t, solution.throttle,'LineWidth',2, 'DisplayName',legStr);
         ylabel('throttle');
         xlabel('Time (s)'); %legend('show',  'Location','best');
     end 
@@ -285,13 +309,24 @@ methods(Static)
         theta = atan2(y,x);
     end
 
-    function ThetaPhi(solution,axTheta,axPhi)
+    function ThetaPhi(solution,axTheta,axPhi,convexSol)
         if solution.constraint.type == POINTING_CONSTRAINT_TYPE.NONE
             [theta, phi] = PlotSolution.GetOptimalThetaPhiFromSolution(solution);
             solution.theta=theta;
             solution.phi = phi;
         end
-        summary = GetSolutionSummary(solution); 
+        
+        if nargin < 4 
+            convexSol = false;
+        end
+        if ~convexSol
+            summary = GetSolutionSummary(solution); 
+            displayStr = summary.constraintString;
+            plotfunc = @plot;
+        else 
+            displayStr = 'Convex';
+            plotfunc = @stairs;
+        end
         axes(axTheta); grid on; hold on; 
         title('\theta^*')
         throttleOn = solution.throttle > .1;
@@ -300,9 +335,9 @@ methods(Static)
         thetaThrottleOn(~throttleOn)=nan;
         thetaThrottleOff(throttleOn)=nan;
 
-        plot(solution.t, thetaThrottleOn,'-','LineWidth',3, 'DisplayName',summary.constraintString);
+        plotfunc(solution.t, thetaThrottleOn,'-','LineWidth',3, 'DisplayName',displayStr);
         ReduceColorOrderIndex(axTheta);
-        plot(solution.t, thetaThrottleOff,'--','LineWidth',1,'HandleVisibility','off');
+        plotfunc(solution.t, thetaThrottleOff,'--','LineWidth',1,'HandleVisibility','off');
 
         ylabel('azimuth angle from target (deg)');
         xlabel('t'); %legend('show',  'Location','best');
@@ -315,9 +350,9 @@ methods(Static)
         phiThrottleOff=90-solution.phi*180/pi;
         phiThrottleOff(throttleOn)=nan;
         
-        plot(solution.t, phiThrottleOn,'-','LineWidth',3, 'DisplayName',summary.constraintString);
+        plotfunc(solution.t, phiThrottleOn,'-','LineWidth',3, 'DisplayName', displayStr);
         ReduceColorOrderIndex(axPhi);
-        plot(solution.t, phiThrottleOff,'--','LineWidth',1,'HandleVisibility','off');
+        plotfunc(solution.t, phiThrottleOff,'--','LineWidth',1,'HandleVisibility','off');
 
         ylabel('polar angle from target (deg)');
         xlabel('t'); %legend('show',  'Location','best');
@@ -331,6 +366,31 @@ methods(Static)
         plot(solution.t, solution.switchFunction,'LineWidth',2, 'DisplayName','Switch Function');
         ylabel('switch function'); 
     end
+
+    function CostatesSwitchFunction(solution)
+        subplot(2,2,[2,4]); grid on; hold on; 
+        summary = GetSolutionSummary(solution); 
+        displayStr = summary.constraintString;
+        plot(solution.t, solution.switchFunction,'LineWidth',2, 'DisplayName',displayStr);
+        title('Switch Function'); xlabel('Time (s)')
+        subplot(2,2,1); grid on; hold on; xlabel('Time (s)')
+        tits = {'\lambda_{r1}','\lambda_{r2}','\lambda_{r3}'};
+        styles = {'--','-',':'};
+        for ii = 2%1:3
+            plot(solution.t,solution.x(:,ii+7),styles{ii},'LineWidth',1.5, 'DisplayName',displayStr);
+            %if ii<3, ReduceColorOrderIndex(gca); end
+        end
+        legend('show','Location','northwest');
+        title(tits{ii})
+        tits = {'\lambda_{v1}','\lambda_{v2}','\lambda_{v3}','\lambda_{m}'};
+        subplot(2,2,3); grid on; hold on; xlabel('Time (s)')
+        for ii = 2%1:3
+            plot(solution.t,solution.x(:,ii+10),styles{ii},'LineWidth',1.5)%,'DisplayName',tits{ii})
+            %if ii<3, ReduceColorOrderIndex(gca); end
+        end
+        title(tits{ii})
+        %legend('show','Location','best')
+    end 
 
     function addThrustDirection(solution,ax,useTrajColor)
         if nargin < 3
@@ -403,6 +463,36 @@ methods(Static)
 %                 2,'-r','LineWidth',1,'MaxHeadSize',1,'DisplayName','Engine Plume')
         end
     end
+
+    function PrintConvergedCostates(solsToDisplay)
+        titleRow = 'Costate';
+        rows = {'$\lambda_{r_1}$', '$\lambda_{r_2}$',... 
+            '$\lambda_{r_3}$', '$\lambda_{v_1}$', '$\lambda_{v_2}$', '$\lambda_{v_3}$',...
+            '$\lambda_m$'};
+        for ii = 1:numel(solsToDisplay)
+            solution = solsToDisplay(ii);
+            if solution.constraint.type == POINTING_CONSTRAINT_TYPE.NONE
+                titleRow = [titleRow, ' & Unconstrained'];
+            elseif solution.constraint.type == POINTING_CONSTRAINT_TYPE.ORIGIN_CONSTANT_ANGLE
+                titleRow = [titleRow, ' & $\alpha=',num2str(solution.constraint.alpha0*180/pi),'^{\circ}$'];
+            elseif solution.constraint.type == POINTING_CONSTRAINT_TYPE.ORIGIN_VARIABLE_ANGLE
+                titleRow = [titleRow, ' & $R=',num2str(solution.constraint.targetRadius*1e3),'$m'];
+            end 
+            if ii == numel(solsToDisplay), titleRow = [titleRow, '\\']; end 
+        end 
+        disp(titleRow)
+        
+        disp('\hline')
+        for ii = 1:7
+            row = rows{ii};
+            for jj = 1:numel(solsToDisplay)
+                solution = solsToDisplay(jj);
+                row = [row,' & ',num2str(solution.newCostateGuess(ii),'%.9g')];
+            end 
+            if ii < 7, row = [row,'\\']; end
+            disp(row);
+        end 
+    end 
      
 
 end 

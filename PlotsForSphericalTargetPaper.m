@@ -1,12 +1,23 @@
 function PlotsForSphericalTargetPaper()
-% Function generates plots for the spherical target RPOD in LEO 
+% This function generates the results and plots (and extras) contained in 
+% the following paper:
+%% H. Panag, R. Woollands, "Thruster-Pointing-Constrained Optimal Control 
+%% for Satellite Servicing Using Indirect Optimization", Journal of
+%% Spacecraft and Rockets, 2024.
+% https://arc.aiaa.org/doi/10.2514/1.A36064
+
+% This code and the above paper supercedes and contains corrections to 
+% work presented at the AIAA SciTech 2024 FORUM held 8-12 January 2024 in
+% Orlando, Florida.
+% https://arc.aiaa.org/doi/10.2514/6.2024-1868
+
 parallelFSolveOptions = optimoptions('fsolve','Display','iter','MaxFunEvals',1e3,...
     'MaxIter',3e2,'TolFun',1e-12,'TolX',1e-9,...
     'UseParallel',true); % fsolve    
 
 %% Diagram showing the set of feasible control regions
 r = 2;
-saveDir = [pwd,'/Resuls'];%Users/himmatpanag/Documents/UIUC/Papers/2024 IEEE/JSR/';
+saveDir = [pwd,'/Results'];%Users/himmatpanag/Documents/UIUC/Papers/2024 IEEE/JSR/';
 od = pwd; 
 hFig = figure("Name",'ConstraintSet','Units','normalized','Position',[0.1689 0.3090 0.2692 0.4993]);
 Plot3D_PointingConstraintSphericalTarget(gca,[3.8;0;0],r);
@@ -428,12 +439,12 @@ legend('show','Location','best');
 saveFigFcn(hf6,saveDir)
 
 hf7 = figure(Name='fuelConsumption'); grid on; hold on; 
-constraintAngles = [0,20,40,60,80,85,90];ii=0;
+constraintAngles = [0,20,40,60,80,85,90];ii=0;fuelConsumptionConstAngle = [];
 for solution = [UnconstrainedShortTimeRhoSweep(end),constantConstraintAngleRhoSweep(:,end)']
     ii = ii+1;
-    fuelConsumption(ii) = -(solution.x(end,7)-solution.x(1,7))*1e3;
+    fuelConsumptionConstAngle(ii) = -(solution.x(end,7)-solution.x(1,7))*1e3;
 end
-plot(constraintAngles,fuelConsumption,'-*','LineWidth',2);
+plot(constraintAngles,fuelConsumptionConstAngle,'-*','LineWidth',2);
 xlabel('Constraint Angle (degrees)'); ylabel('Fuel consumption (g)')
 % title('Total fuel consumption versus thruster constraint angle')
 saveFigFcn(hf7,saveDir)
@@ -534,3 +545,38 @@ solsToDisplay=[UnconstrainedShortTimeRhoSweep(end),...
 solsToDisplay = RerunSolution(solsToDisplay); % Double check everything is converged
 PlotSolution.PrintConvergedCostates(solsToDisplay)
 
+%% Both mass consumptions on one figure
+t = tiledlayout(1,1);
+ax1 = axes(t); 
+plot(ax1,constraintAngles,fuelConsumptionConstAngle,'*-r','LineWidth',2,'DisplayName','Constant Constraint \alpha');
+xlabel('Constraint Angle (degrees)'); ylabel('Fuel consumption (g)');legend('show','Location','west')
+ax1.XColor = 'r';
+
+ax0 = axes(t); hold on;
+massConsumptionUnconstrained = (UnconstrainedShortTimeRhoSweep(end).x(1,7)-UnconstrainedShortTimeRhoSweep(end).x(end,7))*1e3;
+plot(ax0,targetRadii([1,numel(targetRadii)]),ones(2,1)*massConsumptionUnconstrained,'k-','LineWidth',2,'DisplayName','Unconstrained');
+legend('show','Location','northwest');
+ax0.XAxisLocation = 'top';
+ax0.Color = 'none';
+ax0.Box = 'off';
+ax0.YLim = ax1.YLim;
+ax0.YTick = [];
+
+ax2 = axes(t); hold on;
+ax2.XAxisLocation = 'top';
+ax2.YAxisLocation = 'left';
+ax2.XColor = 'b';
+ax2.YLim = ax1.YLim;
+ax2.YTick = [];
+
+plot(ax2,targetRadii,fuelConsumption,'b-*','LineWidth',2,'DisplayName','Spherical Target          ');
+
+ax2.Color = 'none';
+ax1.Box = 'off';
+ax2.Box = 'off';
+ax1.YGrid = "on";
+xlabel('Target Radius (m)'); 
+legend('show','Location','northwest');
+% title('Total fuel consumption versus thruster constraint angle')
+hf = gcf;
+saveFigFcn(hf,saveDir)

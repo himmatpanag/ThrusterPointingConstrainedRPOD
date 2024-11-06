@@ -30,13 +30,13 @@ classdef PlotPoint
             plot3(coords(1),coords(2),coords(3),'bx',...
                 'MarkerSize',10,'DisplayName','Chaser')
         end 
-        function Target(coords,size)
+        function p=Target(coords,size)
             if nargin <2 
                 size = 100; 
             end
-
+           
             axes(gca);
-            plot3(coords(1),coords(2),coords(3),'r.','MarkerSize',size,'DisplayName','Target Spacecraft')
+            p=plot3(coords(1),coords(2),coords(3),'r.','MarkerSize',size,'DisplayName','Target Spacecraft');
         end
 
     end

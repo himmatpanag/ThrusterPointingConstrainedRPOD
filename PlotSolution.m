@@ -402,8 +402,14 @@ methods(Static)
         % Make time steps linearly spaced
         numTimeSteps = 300;
         times = linspace(solution.t(1),solution.t(end),numTimeSteps);
-        sol.throttle = interpn(solution.t,solution.throttle,times)';
+        
         sol.x = interpn(solution.t,solution.x,times)';
+        if ~isfield(solution,'uDir')
+            solution.uDir = (solution.thrustTranslationalFrame./vecnorm(solution.thrustTranslationalFrame))';
+            sol.throttle = interpn(solution.t,vecnorm(solution.thrustTranslationalFrame),times)';
+        else
+            sol.throttle = interpn(solution.t,solution.throttle,times)';
+        end
         sol.uDir = interpn(solution.t,solution.uDir,times)';
   
         % look at every 30 indices and plot the thrust direction if throttle is greater than 0.1
@@ -493,7 +499,167 @@ methods(Static)
             disp(row);
         end 
     end 
-     
+    
+    function PlotOrientationChaserRelativeToTranslationalFrame(p,pos,t,problemParameters,ax)
+        % Plotting the orientation of the chaser in the translational frame is misleading, since the target may be rotating with some angular velocity relative to thte inertial frame and it is not clear what this rate is. 
+        % If we asssume the target is not rotating relative to the inertial frame, then by the end of the trajectory, it will have a slightly different orientation (w.r.t.) to the translational frame. 
+        DCM_BodyToInertial = mrp2DCM(p);
+        DCM_InertialToLVLH = DCM_InertialToRotating(problemParameters.dynamics.frameRotationRate,t);
+        DCM_BodyToLVLH = DCM_InertialToLVLH*DCM_BodyToInertial;
+
+        % Plot a cube of length 2 centred at pos and oriented according to DCM_BodyToLVLH
+        % Define the vertices of the cube
+        cubeLength = 2;
+        vertices = cubeLength/2*[1,1,1;1,1,-1;1,-1,1;1,-1,-1;-1,1,1;-1,1,-1;-1,-1,1;-1,-1,-1];
+         % Rotate the vertices
+        vertices = (DCM_BodyToLVLH*vertices')';
+        % Translate the vertices
+        vertices = vertices + pos';
+        % Define the faces of the cube
+        faces = [1,2,4,3;5,6,8,7;1,2,6,5;3,4,8,7;1,3,7,5;2,4,8,6];
+        % Plot the cube
+        axes(ax);
+        hold on;
+        patch('Vertices',vertices,'Faces',faces,'FaceColor','none','EdgeColor','k','LineWidth',1.5,'DisplayName','Chaser');
+        % Plot the engine plume directions as small cones and label/colour them
+        numEngines = problemParameters.dynamics.numEngines; 
+        C = linspecer(numEngines);
+        for ii = 1:numEngines
+            posEngine = pos + DCM_BodyToLVLH*1e3*problemParameters.dynamics.engineLocationBody(:,ii);
+            plumeDir = -DCM_BodyToLVLH*problemParameters.dynamics.thrustDirectionBody(:,ii);
+            if problemParameters.dynamics.engineConfiguration == THRUSTER_CONFIGURATION.RCS_CANTED
+                coneAng = pi/12;
+            else 
+                coneAng = pi/7;
+            end 
+            s = PlotSolution.PlotCone(ax,coneAng,C(ii,:),cubeLength/5,plumeDir,posEngine);
+            s.DisplayName = ['Engine ',num2str(ii)];
+        end
+        legend('show',"Location","best")
+        axis equal; xlabel('x'); ylabel('y'); zlabel('z')
+        ax.View = [32 30];
+    end
+
+    function s = PlotCone(ax,alpha,color,height,unitVec,origin)
+        axes(ax);
+        % alpha = half angle of cone
+        % color = face color of cone
+
+        heights = linspace(0,height,2);
+        thetas = linspace(-pi,pi,20);
+        [R,T] = meshgrid(heights,thetas);
+        Z = R + origin(3); 
+        X = R.*cos(T).*tan(alpha)+ origin(1);
+        Y = R.*sin(T).*tan(alpha)+ origin(2);
+        s = surf(X,Y,Z);
+        set(s,'FaceAlpha',1);
+        set(s,'LineStyle','--');
+        set(s,'EdgeAlpha',0);
+        set(s,'FaceColor',color);
+
+        rotAngle = 180/pi * acos(dot(unitVec,[0;0;1]));   
+        if ~(rotAngle < pi/180) 
+            if rotAngle > 179
+                rotVec = [1;0;0];
+            else
+                rotVec = cross(unitVec,[0;0;1]);
+            end
+            rotate(s,rotVec,-rotAngle,origin);
+        end
+    end
+
+    function InitialOrientation(solution,ax)
+        if nargin <2 
+            figure; ax = gca;
+        end
+        if ~isfield(solution,'problemParameters')
+            solution.problemParameters = solution;
+        end
+        axes(ax);
+        PlotSolution.PlotOrientationChaserRelativeToTranslationalFrame(solution.problemParameters.p0,solution.problemParameters.x0(1:3)*1e3,0,solution.problemParameters,ax);
+    end
+
+    function hFig = ThrustProfileAllEngines(solution)
+        % Plot the thrust profiles of each engine, create a subplot for each engine
+        hFig = figure;
+        numEngines = solution.problemParameters.dynamics.numEngines;
+        % create grid of subplots based on number of engines
+        numCols = ceil(sqrt(numEngines));
+        numRows = ceil(numEngines/numCols);
+        for ii = 1:numEngines
+            ax(ii) = subplot(numRows,numCols,ii); grid on; hold on;
+            xlabel('Time (s)'); ylabel('Throttle');
+            plot(solution.t,solution.eta(ii,:), 'DisplayName','Constraint');
+            plot(solution.t,solution.throttle(ii,:), 'DisplayName','Throttle');
+            yyaxis right
+            plot(solution.t,solution.switchFunction(ii,:), 'DisplayName','Switch Function');
+            title(['Engine ',num2str(ii)]); ylabel('Switch Function')
+            yyaxis left
+        end
+        linkaxes(ax)
+    end
+
+    function SwitchFunctionAnalysis(solution,ii,ax)
+        if nargin < 3; figure; ax = gca; end
+        if nargin < 2, ii = 1; end
+        axes(ax); grid on; hold on; 
+        dynamics = solution.problemParameters.dynamics;
+        plot(solution.t,solution.switchFunction(ii,:),'DisplayName','Total Engine 1');
+        plot(solution.t,solution.x(:,20)-1,'DisplayName','\lambda_m - 1 term')
+        plot(solution.t,-vecnorm(solution.x(:,17:19)')*dynamics.exhaustVelocity./solution.x(:,7)','DisplayName','\lambda_v term')
+        
+        r_cross_v = cross(dynamics.engineLocationBody(:,ii),dynamics.thrustDirectionBody(:,ii));
+        % Compute the switch functions
+        for jj = 1:numel(solution.t)
+            lastTerm(jj) = -dynamics.exhaustVelocity*solution.x(jj,24:26)*dynamics.inertiaInverse*r_cross_v;
+        end
+        plot(solution.t,lastTerm,'DisplayName','\lambda_\omega term')
+        legend('show','Location','best'); xlabel('Time (s)'); ylabel('Switch Function Components'); title(['Switch Function Breakdown engine ',num2str(ii)])
+    end
+
+    function SwitchFunctionAnalysisAllEngines(solution)
+        numEngines = solution.problemParameters.dynamics.numEngines;
+        % create grid of subplots based on number of engines
+        numCols = ceil(sqrt(numEngines));
+        numRows = ceil(numEngines/numCols);
+        for ii = 1:numEngines
+            ax = subplot(numRows,numCols,ii);
+            PlotSolution.SwitchFunctionAnalysis(solution,ii,ax);
+        end
+    end
+
+    function hf=SixDOF_Traj(solution)
+        hf=figure('Name','6DOF Trajectory'); grid on; hold on;
+        PlotSolution.InitialOrientation(solution);
+        plot3(0,0,0,'m.','MarkerSize',80,'DisplayName','Target Location')
+        x = [solution.problemParameters.x0(1:6)';solution.problemParameters.xf']*1e3;
+        plot3(x(1,1), x(1,2), x(1,3),'bo','MarkerSize',10,'DisplayName','x_0 Chaser Initial')
+        plot3(x(end,1), x(end,2), x(end,3),'ko','MarkerSize',10,'DisplayName','x_f Chaser Final')
+        plot3(solution.x(:,1)*1e3,solution.x(:,2)*1e3,solution.x(:,3)*1e3,'DisplayName','OptimalTraj')
+
+    end
+
+    function PlumeAngleSixDOF(solution,ax, engineNum)
+        axes(ax); grid on; hold on;
+        if nargin < 3
+            engineNum = 1;
+        end
+        % Compute the plume angle from the origin
+        angle = zeros(numel(solution.t),1);
+        for ii = 1:numel(solution.t)
+            p = solution.x(ii,8:10);
+            DCM_BodyToInertial = mrp2DCM(p);
+            DCM_InertialToLVLH = DCM_InertialToRotating(solution.problemParameters.dynamics.frameRotationRate,t);
+            DCM_BodyToLVLH = DCM_InertialToLVLH*DCM_BodyToInertial;
+            vecEngineToTargetBodyFrame = DCM_BodyToLVLH'*solution.x(ii,1:3) + solution.problemParameters.dynamics.engineLocationBody(:,ii);
+            
+            angle(ii) = acos(dot(solution.problemParameters.dynamics.engineLocationBody(:,ii),vecEngineToTargetBodyFrame)/...
+                (norm(vecEngineToTargetBodyFrame)))*180/pi;
+        end
+        axes(ax); p = plot(solution.t,angle,'DisplayName',['Engine ',num2str(engineNum)]);
+        xlabel('Time (s)'); ylabel('Plume Angle (deg)'); title('Plume Angle from Target')
+        
+    end
 
 end 
 end 

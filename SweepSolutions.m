@@ -17,6 +17,13 @@ if contains(type,'rho')
     if dynamicStepSize
         dynamicRhoSpeedUp = true;
     end
+elseif contains(type,'epsilon')
+    epsilonRate = 0.9;    
+    final_epsilon = values(1);
+    N = ceil(log(final_epsilon/problemParameters.constraint.epsilon)/log(epsilonRate));
+    if dynamicStepSize
+        dynamicRhoSpeedUp = true;
+    end
 else 
     N = numel(values);
 end
@@ -65,6 +72,15 @@ while ii < N+1
             if targetValue*rhoRate < finalRho
                 break
             end
+        case 'epsilon'
+            if prevStepPass, prevValue = problemParameters.constraint.epsilon; end
+            targetValue = prevValue*epsilonRate;
+            stepSize = (targetValue-prevValue)/(numFails+1);
+            problemParameters.constraint.epsilon = prevValue + stepSize;
+            if targetValue*epsilonRate < final_epsilon
+                break
+            end
+            fprintf('prevValue %f\t stepSize\t%f newValue%f\t',prevValue,stepSize,(prevValue+stepSize));
         case 'rhoAngle'
             if prevStepPass, prevValue = solverParameters.rho; prevValueAng = problemParameters.constraint.alpha0; end                         
 
@@ -79,7 +95,11 @@ while ii < N+1
     end     
 
     fprintf('iterIdx = %d\trho=%f\n',ii,solverParameters.rho);
-    solution = SolvePointingConstrainedControlProblem(problemParameters,solverParameters);
+    if numel(solverParameters.initialCostateGuess) > 10
+        solution = Solve6DOFPointingConstrainedControlProblem(problemParameters,solverParameters);
+    else 
+        solution = SolvePointingConstrainedControlProblem(problemParameters,solverParameters);
+    end 
     if norm(solution.x(end,1:6)'-solution.problemParameters.xf) > 1e-6 && dynamicStepSize % 1e-8 % less than 0.1mm error
         warning('Solution did not converge');        
         numFails = numFails+1;

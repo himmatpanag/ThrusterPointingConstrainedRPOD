@@ -15,4 +15,4 @@ Core functions: (also explained in 'ExampleCode.m')
 
 **References**
 
-[1] H. Panag, R. Woollands; Thruster Pointing Constrained Optimal Control for Satellite Servicing using Indirect Optimization, Journal of Spacecraft and Rockets. 
+[1] Panag H. and Woollands R. M., "Thruster-Pointing-Constrained Optimal Control for Satellite Servicing Using Indirect Optimization", Journal of Spacecraft and Rockets, Published Online 24 Oct 2024, https://doi.org/10.2514/1.A36064

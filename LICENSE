@@ -9,8 +9,11 @@ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 copies of the Software, and to permit persons to whom the Software is
 furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Any publication which results from the the use of this software includes a 
+citation to the relevant journal paper. 
+[1] Panag H. and Woollands R. M., "Thruster-Pointing-Constrained Optimal 
+Control for Satellite Servicing Using Indirect Optimization", Published 
+Online 24 Oct 2024, https://doi.org/10.2514/1.A36064
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,

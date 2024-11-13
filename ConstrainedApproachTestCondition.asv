@@ -58,8 +58,8 @@ switch caseNum
         problemParameters.x0 = [.010;0;0;0;0;0];
         problemParameters.xf = [.004;0;0;0;0;0];    
         problemParameters.u_max = 0.05;        
-        transferTime = 40;
-        solverParameters.tSpan = linspace(0,transferTime,1000);
+        problemParameters.transferTime = 40;
+        solverParameters.tSpan = linspace(0,problemParameters.transferTime,1000);
         switch caseNum
             case 0 % No constraint
                 problemParameters.constraint.type = POINTING_CONSTRAINT_TYPE.NONE;
@@ -101,9 +101,11 @@ switch caseNum
         problemParameters.dynamics.maxThrust = problemParameters.dynamics.maxThrust/1e3; % Convert to km
         problemParameters.u_max = problemParameters.u_max/1e3; % Convert to km
         problemParameters.dynamics.exhaustVelocity = problemParameters.dynamics.exhaustVelocity/1e3;  % Convert to km
-        transferTime = 25*60;
+        problemParameters.transferTime = 25*60;
 
-        solverParameters.tSpan = [0,transferTime];
+        solverParameters.tSpan = [0,problemParameters.transferTime];
+        % rVec = problemParameters.x0(1:3)-problemParameters.xf(1:3); rVec = rVec/norm(rVec);
+        %solverParameters.initialCostateGuess = 1e-3*[rand(3,1);rVec;rand(1,1)];
         solverParameters.initialCostateGuess = 1e-3*rand(7,1);
 
         switch caseNum
@@ -131,15 +133,15 @@ switch caseNum
         problemParameters.x0 = problemParameters.x0(1:6); 
     case {1011,1012,1013,1014} % 6dof problems with similar conditions to the transfers in the JSR paper 
         [problemParameters, solverParameters] = ConstrainedApproachTestCondition(caseNum-1000,engineType,thrusterConfig);
-        transferTime = 48;
-        solverParameters.tSpan = [0, transferTime];
+        problemParameters.transferTime = 48;
+        solverParameters.tSpan = [0, problemParameters.transferTime];
 
         [numEngines, locations, thrustDirection] = GetEngineLocations(thrusterConfig);
         problemParameters.dynamics.engineConfiguration = thrusterConfig;
         problemParameters.dynamics.numEngines = numEngines;
         problemParameters.dynamics.engineLocationBody = locations/1e3;
         problemParameters.dynamics.thrustDirectionBody = thrustDirection;
-        problemParameters.dynamics.inertia = diag([32,33,34])./1e6; % kg.km^2
+        problemParameters.dynamics.inertia = diag([14,16,18])./1e6; % kg.km^2
         problemParameters.dynamics.inertiaInverse = inv(problemParameters.dynamics.inertia);
         problemParameters.dynamics.initialMass = problemParameters.initialMass;
         problemParameters.constraint.epsilon = 0.5;
@@ -149,15 +151,13 @@ switch caseNum
         problemParameters.pf = [0;0;0];
         problemParameters.w0 = [0;0;0];
         problemParameters.wf = [0;0;0];
-    case {1100,1101} % Attitude rotations only
+    case {1100,1101} % Attitude rotations only, 30 degrees
         [problemParameters, solverParameters] = ConstrainedApproachTestCondition(1011,engineType,thrusterConfig);
         problemParameters.xf(1:6) = problemParameters.x0(1:6);
-        solverParameters.tSpan = [0, 20];
-        solverParameters.initialCostateGuess = 1e-4.*[ 0.000000000000548   0.000000000009525  -0.000000000000206   0.000000000003950   0.000000000238142  -0.000000000017221   0.000194845229529 -0.037211240026859   0.000000000000000  -0.000000000000000  -0.893093076017197  -0.000000000000000  -0.000000000000002]';
         switch caseNum
-            case 1100 % 60 degrees
-                problemParameters.pf = [1;0;0]*tan(60*pi/180/4); % = n*tan(theta/4), where n is unit vector, theta is angle of rotation. 
-            case 1101 % 180 degrees
+            case 1100
+                problemParameters.pf = [1;0;0]*tan(30*pi/180/4); % = n*tan(theta/4), where n is unit vector, theta is angle of rotation. 
+            case 1101
                 problemParameters.pf = [1;0;0]; % = n*tan(theta/4), where n is unit vector, theta is angle of rotation. 
         end
 end

@@ -94,18 +94,23 @@ while ii < N+1
             solverParameters.rho = prevValue + stepSize;             
     end     
 
-    fprintf('iterIdx = %d\trho=%f\n',ii,solverParameters.rho);
+    fprintf('iterIdx = %d\trho=%f\n',iter,solverParameters.rho);
     if numel(solverParameters.initialCostateGuess) > 10
         solution = Solve6DOFPointingConstrainedControlProblem(problemParameters,solverParameters);
     else 
         solution = SolvePointingConstrainedControlProblem(problemParameters,solverParameters);
     end 
-    if norm(solution.x(end,1:6)'-solution.problemParameters.xf) > 1e-6 && dynamicStepSize % 1e-8 % less than 0.1mm error
+    if isfield(solution,'finalStateError')
+        solPass = norm(solution.finalStateError)<1e-8;
+    else
+        solPass = ~any(~solution.solutionFound);
+    end
+    if ~solPass && dynamicStepSize % 1e-8 % less than 0.1mm error
         warning('Solution did not converge');        
         numFails = numFails+1;
         prevStepPass = false;            
         if dynamicRhoSpeedUp
-            rhoRate = min(.95,rhoRate+.1);        
+            rhoRate = min(.98,rhoRate+.1);        
         end
     else 
         iter = iter+1;
@@ -117,7 +122,7 @@ while ii < N+1
         newSols(iter) = solution;
         solverParameters.initialCostateGuess = solution.newCostateGuess;        
         if dynamicRhoSpeedUp
-            rhoRate = max(rhoMin,rhoRate-.1);        
+            rhoRate = max(rhoMin,rhoRate-.02);        
         end
     end 
 

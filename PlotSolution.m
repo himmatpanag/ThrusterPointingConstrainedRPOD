@@ -604,7 +604,7 @@ methods(Static)
         if nargin < 2, ii = 1; end
         axes(ax); grid on; hold on; 
         dynamics = solution.problemParameters.dynamics;
-        plot(solution.t,solution.switchFunction(ii,:),'DisplayName','Total Engine 1');
+        plot(solution.t,solution.switchFunction(ii,:),'DisplayName',['Total Engine ',num2str(ii)]);
         plot(solution.t,solution.x(:,20)-1,'DisplayName','\lambda_m - 1 term')
         plot(solution.t,-vecnorm(solution.x(:,17:19)')*dynamics.exhaustVelocity./solution.x(:,7)','DisplayName','\lambda_v term')
         
@@ -625,6 +625,9 @@ methods(Static)
         for ii = 1:numEngines
             ax = subplot(numRows,numCols,ii);
             PlotSolution.SwitchFunctionAnalysis(solution,ii,ax);
+            if ii > 1
+                axes(ax); legend('hide');
+            end
         end
     end
 
@@ -636,7 +639,6 @@ methods(Static)
         plot3(x(1,1), x(1,2), x(1,3),'bo','MarkerSize',10,'DisplayName','x_0 Chaser Initial')
         plot3(x(end,1), x(end,2), x(end,3),'ko','MarkerSize',10,'DisplayName','x_f Chaser Final')
         plot3(solution.x(:,1)*1e3,solution.x(:,2)*1e3,solution.x(:,3)*1e3,'DisplayName','OptimalTraj')
-
     end
 
     function PlumeAngleSixDOF(solution,ax, engineNum)
@@ -658,8 +660,46 @@ methods(Static)
         end
         axes(ax); p = plot(solution.t,angle,'DisplayName',['Engine ',num2str(engineNum)]);
         xlabel('Time (s)'); ylabel('Plume Angle (deg)'); title('Plume Angle from Target')
-        
     end
-
+    function AttitudeMRP(sol,ax)
+        if nargin < 2, figure; ax = gca; end
+        axes(ax);grid on; hold on; 
+        for ii = 1:3
+            plot(sol.t,sol.x(:,ii+7),'DisplayName',['MRP ',num2str(ii)])
+            ReduceColorOrderIndex(ax);
+            plot(0,sol.problemParameters.p0(ii),'x','DisplayName',['MRP ',num2str(ii),' Initial']);
+            ReduceColorOrderIndex(ax);
+            plot(sol.t(end),sol.problemParameters.pf(ii),'o','DisplayName',['MRP ',num2str(ii),' Initial']);
+        end 
+        legend('show','Location','best'); ylabel('MRP'); xlabel('Time (s)');
+    end 
+    function AngularRates(sol,ax)
+        if nargin < 2, figure; ax = gca; end
+        axes(ax);AxBruh = 'xyz'; grid on; hold on; 
+        for ii = 1:3
+            plot(sol.t,180/pi.*sol.x(:,ii+10),'DisplayName',['\omega_',AxBruh(ii)])
+            ReduceColorOrderIndex(ax);
+            plot(0,180/pi.*sol.problemParameters.w0(ii),'x','DisplayName',['\omega_',AxBruh(ii),' Initial']);
+            ReduceColorOrderIndex(ax);
+            plot(sol.t(end),180/pi.*sol.problemParameters.wf(ii),'o','DisplayName',['\omega_',AxBruh(ii),' Initial']);
+        end 
+        legend('show','Location','best')
+        ylabel('Deg/s'); xlabel('Time (s)');
+    end 
+    function Torque(sol,ax)
+        if nargin < 2, figure; ax = gca; end
+        axes(ax);AxBruh = 'xyz'; grid on; hold on; 
+        for ii = 1:3
+            plot(sol.t,1e6.*sol.torqueInertialFrame(ii,:),'DisplayName',['\omega_',AxBruh(ii)])
+        end 
+        legend('show','Location','best')
+        ylabel('Torque Nm'); xlabel('Time (s)');
+    end 
+    function RotationalSummary(sol)
+        figure; 
+        PlotSolution.AttitudeMRP(sol,subplot(3,1,1));
+        PlotSolution.AngularRates(sol,subplot(3,1,2));
+        PlotSolution.Torque(sol,subplot(3,1,3));
+    end 
 end 
 end 

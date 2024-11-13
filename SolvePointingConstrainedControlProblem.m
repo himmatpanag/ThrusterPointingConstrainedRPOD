@@ -24,6 +24,7 @@ function solution = SolvePointingConstrainedControlProblem(problemParameters, so
         X_minU = optimalTraj.X;
         error = optimalTraj.err; 
         solution.solutionFound = abs(error)<solverParameters.stateConvergeneTolerance; 
+        solution.finalStateError = error;
         solution.t = optimalTraj.t;
         solution.x = X_minU;
         [S,delta,uDir,phiMin,thetaMin] = GetControlProfile(X_minU,solverParameters.rho,problemParameters.constraint,problemParameters.dynamics);

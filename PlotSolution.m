@@ -153,7 +153,6 @@ methods(Static)
     end
 
     % Implement slider plot for summaryShort
-
     function hf = summary(solution,figIn)
         if nargin < 2 
             hf = figure;
@@ -534,6 +533,10 @@ methods(Static)
             end 
             s = PlotSolution.PlotCone(ax,coneAng,C(ii,:),cubeLength/5,plumeDir,posEngine);
             s.DisplayName = ['Engine ',num2str(ii)];
+            % sz = size(s.XData);
+            % row = dataTipTextRow('Engine ',repelem(num2str(ii),20,1)  );
+            % s.DataTipTemplate.DataTipRows(end+1) = row;
+            % datatip(s,s.XData(1),s.YData(2),23)
         end
         legend('show',"Location","best")
         axis equal; xlabel('x'); ylabel('y'); zlabel('z')
@@ -589,12 +592,13 @@ methods(Static)
         for ii = 1:numEngines
             ax(ii) = subplot(numRows,numCols,ii); grid on; hold on;
             xlabel('Time (s)'); ylabel('Throttle');
-            plot(solution.t,solution.eta(ii,:), 'DisplayName','Constraint');
-            plot(solution.t,solution.throttle(ii,:), 'DisplayName','Throttle');
+            plot(solution.t,solution.throttle(ii,:), 'LineWidth',2,'DisplayName','\delta');
+            plot(solution.t,solution.eta(ii,:), '--','LineWidth',3,'DisplayName','\eta');
             yyaxis right
             plot(solution.t,solution.switchFunction(ii,:), 'DisplayName','Switch Function');
             title(['Engine ',num2str(ii)]); ylabel('Switch Function')
             yyaxis left
+            if ii==1, legend('show','Location','best'); end
         end
         linkaxes(ax)
     end
@@ -605,21 +609,36 @@ methods(Static)
         axes(ax); grid on; hold on; 
         dynamics = solution.problemParameters.dynamics;
         plot(solution.t,solution.switchFunction(ii,:),'DisplayName',['Total Engine ',num2str(ii)]);
-        plot(solution.t,solution.x(:,20)-1,'DisplayName','\lambda_m - 1 term')
-        plot(solution.t,-vecnorm(solution.x(:,17:19)')*dynamics.exhaustVelocity./solution.x(:,7)','DisplayName','\lambda_v term')
+        plot(solution.t,solution.eta(ii,:)'.* solution.x(:,20)-1,'DisplayName','\lambda_m - 1 term')
+        
         
         r_cross_v = cross(dynamics.engineLocationBody(:,ii),dynamics.thrustDirectionBody(:,ii));
+        lastTerm = zeros(numel(solution.t),1);
+        lmbdav_Term = zeros(numel(solution.t),1);
+        
         % Compute the switch functions
         for jj = 1:numel(solution.t)
-            lastTerm(jj) = -dynamics.exhaustVelocity*solution.x(jj,24:26)*dynamics.inertiaInverse*r_cross_v;
+            p = solution.x(jj,8:10)'; p2 = p'*p;
+            pCross = [0 -p(3) p(2); p(3) 0 -p(1); -p(2) p(1) 0];
+            temp = (1+p2)^2; t = solution.t(jj);
+            DCM_BodyToInertial = eye(3) - 4*(1-p2)/temp*pCross + 8/temp * (p*p');
+            DCM_InertialToLVLH = [cos(dynamics.frameRotationRate*t) sin(dynamics.frameRotationRate*t) 0;
+                                  -sin(dynamics.frameRotationRate*t) cos(dynamics.frameRotationRate*t) 0;
+                                  0 0 1];
+            DCM_BodyToTranslationalFrame = DCM_InertialToLVLH*DCM_BodyToInertial;
+            lastTerm(jj) = -solution.eta(ii,jj).*dynamics.exhaustVelocity*dynamics.initialMass/solution.x(jj,7) * solution.x(jj,24:26)*dynamics.inertiaInverse*r_cross_v;
+
+            lmbdav_Term(jj) = -solution.eta(ii,jj).*solution.x(jj,17:19)*DCM_BodyToTranslationalFrame*dynamics.thrustDirectionBody(:,ii) * dynamics.exhaustVelocity./solution.x(jj,7);
         end
+        plot(solution.t,lmbdav_Term,'DisplayName','\lambda_v term')
         plot(solution.t,lastTerm,'DisplayName','\lambda_\omega term')
-        legend('show','Location','best'); xlabel('Time (s)'); ylabel('Switch Function Components'); title(['Switch Function Breakdown engine ',num2str(ii)])
+        legend('show','Location','best'); xlabel('Time (s)'); ylabel('SF Components'); title(['Breakdown engine ',num2str(ii)])
     end
 
     function SwitchFunctionAnalysisAllEngines(solution)
         numEngines = solution.problemParameters.dynamics.numEngines;
         % create grid of subplots based on number of engines
+        figure;
         numCols = ceil(sqrt(numEngines));
         numRows = ceil(numEngines/numCols);
         for ii = 1:numEngines
@@ -633,33 +652,51 @@ methods(Static)
 
     function hf=SixDOF_Traj(solution)
         hf=figure('Name','6DOF Trajectory'); grid on; hold on;
-        PlotSolution.InitialOrientation(solution);
+        PlotSolution.InitialOrientation(solution,gca);
         plot3(0,0,0,'m.','MarkerSize',80,'DisplayName','Target Location')
         x = [solution.problemParameters.x0(1:6)';solution.problemParameters.xf']*1e3;
         plot3(x(1,1), x(1,2), x(1,3),'bo','MarkerSize',10,'DisplayName','x_0 Chaser Initial')
         plot3(x(end,1), x(end,2), x(end,3),'ko','MarkerSize',10,'DisplayName','x_f Chaser Final')
         plot3(solution.x(:,1)*1e3,solution.x(:,2)*1e3,solution.x(:,3)*1e3,'DisplayName','OptimalTraj')
+    
+        if solution.problemParameters.constraint.type == POINTING_CONSTRAINT_TYPE.ORIGIN_VARIABLE_ANGLE
+            PlotSphereConstraint(gca,2,[0;0;0])
+        end
     end
 
     function PlumeAngleSixDOF(solution,ax, engineNum)
+        if nargin < 2 
+            figure; ax = gca;
+        end
         axes(ax); grid on; hold on;
         if nargin < 3
-            engineNum = 1;
+            engineNum = 1:solution.problemParameters.dynamics.numEngines;
         end
+        C = linspecer(numel(engineNum));
         % Compute the plume angle from the origin
-        angle = zeros(numel(solution.t),1);
-        for ii = 1:numel(solution.t)
-            p = solution.x(ii,8:10);
-            DCM_BodyToInertial = mrp2DCM(p);
-            DCM_InertialToLVLH = DCM_InertialToRotating(solution.problemParameters.dynamics.frameRotationRate,t);
-            DCM_BodyToLVLH = DCM_InertialToLVLH*DCM_BodyToInertial;
-            vecEngineToTargetBodyFrame = DCM_BodyToLVLH'*solution.x(ii,1:3) + solution.problemParameters.dynamics.engineLocationBody(:,ii);
-            
-            angle(ii) = acos(dot(solution.problemParameters.dynamics.engineLocationBody(:,ii),vecEngineToTargetBodyFrame)/...
-                (norm(vecEngineToTargetBodyFrame)))*180/pi;
+        for jj = engineNum
+            angle = zeros(numel(solution.t),1);
+            for ii = 1:numel(solution.t)
+                p = solution.x(ii,8:10)';
+                DCM_BodyToInertial = mrp2DCM(p);
+                DCM_InertialToLVLH = DCM_InertialToRotating(solution.problemParameters.dynamics.frameRotationRate,solution.t(ii));
+                DCM_BodyToLVLH = DCM_InertialToLVLH*DCM_BodyToInertial;
+                vecEngineToTargetBodyFrame = DCM_BodyToLVLH'*solution.x(ii,1:3)' + solution.problemParameters.dynamics.engineLocationBody(:,jj);
+                
+                angle(ii) = acos(dot(solution.problemParameters.dynamics.thrustDirectionBody(:,jj),vecEngineToTargetBodyFrame)/...
+                    (norm(vecEngineToTargetBodyFrame)))*180/pi;
+            end
+            engineOn = solution.throttle(jj,:) > .8; angleOn = angle; angleOn(~engineOn) =NaN;
+            angleOff = angle; angleOff(engineOn) = NaN;
+            plot(solution.t,angleOn,'Color',C(jj,:),'LineWidth',2,'DisplayName',['Engine ',num2str(jj)]);
+            plot(solution.t,angleOff,'--','Color',C(jj,:),'DisplayName',['Engine ',num2str(jj)],'HandleVisibility','off');
         end
-        axes(ax); p = plot(solution.t,angle,'DisplayName',['Engine ',num2str(engineNum)]);
         xlabel('Time (s)'); ylabel('Plume Angle (deg)'); title('Plume Angle from Target')
+        if solution.problemParameters.constraint.type == POINTING_CONSTRAINT_TYPE.ORIGIN_VARIABLE_ANGLE
+            allowableAngs=PlotSolution.GetAllowableAngles(solution);
+            plot(solution.t, allowableAngs ,'r--','DisplayName','Allowable angle')
+        end
+        legend('show','Location','best')
     end
     function AttitudeMRP(sol,ax)
         if nargin < 2, figure; ax = gca; end
@@ -690,7 +727,7 @@ methods(Static)
         if nargin < 2, figure; ax = gca; end
         axes(ax);AxBruh = 'xyz'; grid on; hold on; 
         for ii = 1:3
-            plot(sol.t,1e6.*sol.torqueInertialFrame(ii,:),'DisplayName',['\omega_',AxBruh(ii)])
+            plot(sol.t,sol.torqueInertialFrame(ii,:),'DisplayName',['\omega_',AxBruh(ii)])
         end 
         legend('show','Location','best')
         ylabel('Torque Nm'); xlabel('Time (s)');
@@ -701,5 +738,84 @@ methods(Static)
         PlotSolution.AngularRates(sol,subplot(3,1,2));
         PlotSolution.Torque(sol,subplot(3,1,3));
     end 
+
+    function ConvergedCostateTrace(sols)
+        N = numel(sols);
+        NLambda = numel(sols(1).newCostateGuess);
+        xVals = zeros(N,1);
+        plotFun = @plot;
+        if sols(1).solverParameters.rho ~= sols(3).solverParameters.rho % This is a rho sweep
+            for ii = 1:N, xVals(ii) = sols(ii).solverParameters.rho; end 
+            xLab = 'Throttle smoothing parameter \rho'; 
+            plotFun = @semilogx;
+        elseif isfield(sols(1).problemParameters.constraint,'targetRadius') && (sols(1).problemParameters.constraint.targetRadius ~= sols(3).problemParameters.constraint.targetRadius)
+            for ii = 1:N, xVals(ii) = 1000*sols(ii).problemParameters.constraint.targetRadius; end 
+            xLab = 'Target Radius (m)'; 
+        elseif isfield(sols(1).problemParameters.constraint,'epsilon') && sols(1).problemParameters.constraint.epsilon ~= sols(3).problemParameters.constraint.epsilon
+            for ii = 1:N, xVals(ii) = sols(ii).problemParameters.constraint.epsilon; end 
+            xLab = 'Constraint smoothing parameter \epsilon'; 
+            plotFun = @semilogx;
+        elseif sols(1).problemParameters.dynamics.maxThrust(1) ~=sols(4).problemParameters.dynamics.maxThrust(1)
+            for ii = 1:N, xVals(ii) = sols(ii).problemParameters.dynamics.maxThrust(end); end 
+            xLab = 'Thrust Value'; 
+        elseif sols(1).problemParameters.dynamics.inertia(2,2) ~=sols(4).problemParameters.dynamics.inertia(2,2)
+            for ii = 1:N, xVals(ii) = sols(ii).problemParameters.dynamics.inertia(2,2); end 
+            xLab = 'Inertia'; 
+        end
+        costateGuesses = zeros(NLambda,N);
+        converged = false(N,1);
+        for ii =1:N
+            costateGuesses(:,ii) = sols(ii).newCostateGuess;
+            converged(ii) = ~any(~sols(ii).solutionFound);
+        end
+        figure; allIters = 1:N;
+        for ii =1:NLambda
+            subplot(2,2,min(floor(ii/4)+1,4));
+            g = costateGuesses(ii,:);
+            a1 = plotFun(xVals(converged),g(converged),'-o','DisplayName',['\lambda_{',num2str(ii),'}']);
+            row = dataTipTextRow('Iter ',allIters(converged));
+            a1.DataTipTemplate.DataTipRows(end+1) = row;
+            grid on;  hold on; 
+            if any(~converged)
+                ReduceColorOrderIndex(gca);
+                a2 = plotFun(xVals(~converged),g(~converged),'--','DisplayName',['\lambda_',num2str(ii)],'HandleVisibility','off');
+                row2 = dataTipTextRow('Iter ',allIters(~converged));
+                a2.DataTipTemplate.DataTipRows(end+1) = row2;
+            end
+            legend('show','Location','best'); xlabel(xLab);
+        end
+        for ii = 1:4, ax(ii) = subplot(2,2,ii); end 
+        linkaxes(ax,'x');
+    end
+
+    function TranslationalSummary(solution)
+        % Plot pos, vel, Thrust on three different subplots
+        figure;
+        legs = 'xyz';
+        subplot(3,1,1); grid on; hold on;
+        for jj = 1:3
+            plot(solution.t,solution.x(:,jj)*1e3,'DisplayName',legs(jj));
+            ReduceColorOrderIndex(gca);
+            plot(0,solution.problemParameters.x0(jj)*1e3,'x','DisplayName',[legs(jj),' Initial']);
+            ReduceColorOrderIndex(gca);
+            plot(solution.t(end),solution.problemParameters.xf(jj)*1e3,'o','DisplayName',[legs(jj),' Final']);
+        end
+        legend('show','Location','best'); ylabel('Position (m)'); xlabel('Time (s)');
+        subplot(3,1,2); grid on; hold on;
+        for jj = 1:3
+            plot(solution.t,solution.x(:,jj+3)*1e3,'DisplayName',['v_',legs(jj)]);
+            ReduceColorOrderIndex(gca);
+            plot(0,solution.problemParameters.x0(jj+3)*1e3,'x','DisplayName',['v_',legs(jj),' Initial']);
+            ReduceColorOrderIndex(gca);
+            plot(solution.t(end),solution.problemParameters.xf(jj+3)*1e3,'o','DisplayName',['v_',legs(jj),' Final']);
+        end
+        legend('show','Location','best'); ylabel('Velocity (m/s)'); xlabel('Time (s)');
+        subplot(3,1,3); grid on; hold on;
+        for ii = 1:3
+            plot(solution.t,1e3.*solution.thrustTranslationalFrame(ii,:),'DisplayName',['F',legs(ii)])
+        end 
+        legend('show','Location','best')
+        ylabel('Force N'); xlabel('Time (s)');
+    end
 end 
 end 

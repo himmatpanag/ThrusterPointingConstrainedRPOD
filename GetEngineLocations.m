@@ -21,6 +21,13 @@ function [numEngines, locations, thrustDirection] = GetEngineLocations(engineCon
                     mm = mm + 1; 
                 end
             end
+        case THRUSTER_CONFIGURATION.CG_6_RCS_12
+            [numEngines1, locations1, thrustDirection1] = GetEngineLocations(THRUSTER_CONFIGURATION.CG_ALIGNED_6);
+            [numEngines2, locations2, thrustDirection2] = GetEngineLocations(THRUSTER_CONFIGURATION.RCS_12);
+            numEngines = numEngines1 + numEngines2; 
+            locations = [locations1,locations2];
+            thrustDirection = [thrustDirection1,thrustDirection2];
+            
         case THRUSTER_CONFIGURATION.RCS_14_CANTED
             [~, locations, thrustDirection] = GetEngineLocations(THRUSTER_CONFIGURATION.RCS_12);
             numEngines = 14; 

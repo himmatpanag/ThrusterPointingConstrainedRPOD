@@ -7,5 +7,6 @@ classdef THRUSTER_CONFIGURATION < uint16
       CG_6_RCS_12 (5)
       RCS_14_CANTED (6)
       RCS_CANTED (7)
+      CG_ALIGNED_CANTED_8 (8)
    end
 end

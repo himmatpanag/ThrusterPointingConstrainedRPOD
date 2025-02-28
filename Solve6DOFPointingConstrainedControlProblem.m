@@ -1,28 +1,32 @@
-function solution = Solve6DOFPointingConstrainedControlProblem(problemParameters, solverParameters)
+function solution = Solve6DOFPointingConstrainedControlProblem(problemParameters, solverParameters, skipSol)
     % Author: Himmat Panag
     % Solves a single instance of the 6DOF Optimal Control Problem
     % Not allowed to point at the origin
     % TODO: Turn this into a mex file
     % Date: 18 Oct 2024
-    spmd, startPool=true; end
-
+    if nargin < 3, skipSol = false; end
+    if isempty(gcp), parpool(8); end
+    problemParameters.dynamics.finalT = solverParameters.tSpan(end);
     [initialGuess,remainingCostates] = ChooseCostatesToIgnore( ...
-        problemParameters.dynamics.engineConfiguration,solverParameters.initialCostateGuess);
-    [lam0,~] = fsolve(@costFunction,initialGuess,...
-        solverParameters.fSolveOptions,...
-        solverParameters.tSpan, problemParameters.x0, problemParameters.xf,...
-        problemParameters.p0,problemParameters.pf,...
-        problemParameters.w0,problemParameters.wf,...
-        solverParameters.rho,...
-        problemParameters.constraint,...
-        problemParameters.dynamics,remainingCostates, ...
-        solverParameters.odeOptions,false);
-
+        problemParameters.dynamics,solverParameters.initialCostateGuess);
+    if skipSol % We may want to get experimental with guesses of lam0, This spits out the error with a particular lam0, without doing any solving
+        lam0=initialGuess; exitFlag = -1;
+    else
+        [lam0,~,exitFlag] = fsolve(@costFunction,initialGuess,...
+            solverParameters.fSolveOptions,...
+            solverParameters.tSpan, problemParameters.x0, problemParameters.xf,...
+            problemParameters.p0,problemParameters.pf,...
+            problemParameters.w0,problemParameters.wf,...
+            solverParameters.rho,...
+            problemParameters.constraint,...
+            problemParameters.dynamics,remainingCostates, ...ß
+            solverParameters.odeOptions,false);
+    end
     solution = emptySolutionStruct(problemParameters,solverParameters);
-    solution.newCostateGuess = [lam0;remainingCostates];
+    solution.newCostateGuess = CombineIgnoredCostates(problemParameters.dynamics, lam0, remainingCostates); 
     if solverParameters.getTraj
         [initialGuess,remainingCostates] = ChooseCostatesToIgnore( ...
-            problemParameters.dynamics.engineConfiguration, solution.newCostateGuess);
+            problemParameters.dynamics, solution.newCostateGuess);
         optimalTraj = costFunction(initialGuess,...            
             solverParameters.tSpan, problemParameters.x0, problemParameters.xf,...
             problemParameters.p0,problemParameters.pf,...
@@ -34,9 +38,14 @@ function solution = Solve6DOFPointingConstrainedControlProblem(problemParameters
         
         X_minU = optimalTraj.X;
         error = optimalTraj.err; 
-        solution.solutionFound = abs(error)<solverParameters.stateConvergeneTolerance; 
+        solution.solutionFound = exitFlag>0;
         solution.finalStateError = error;
-        solution.t = optimalTraj.t;
+        if problemParameters.dynamics.sundman.useTransform
+            solution.t = optimalTraj.X(:,27);
+            solution.simTime = optimalTraj.t;
+        else
+            solution.t = optimalTraj.t;
+        end
         solution.x = X_minU;
         solution.throttle = zeros(problemParameters.dynamics.numEngines,numel(solution.t));
         solution.eta = zeros(problemParameters.dynamics.numEngines,numel(solution.t));
@@ -55,191 +64,235 @@ function solution = Solve6DOFPointingConstrainedControlProblem(problemParameters
         end       
     end 
 end
-function [initialGuess,remainingCostates] = ChooseCostatesToIgnore(engineConfig, costateGuess)
-    switch engineConfig
-        case THRUSTER_CONFIGURATION.CG_ALIGNED_6 % In this case the attitude 
-            % dynamics is not controllable. The solver tries to vary the p
-            % and omega costates but they have no affect on the cost
-            % function so it is unable to converge. We limit the fsolve
-            % parameters to only the first 7 of the initialCostateGuess and
-            % the solver easily converges to the optimal solution
+function [initialGuess,remainingCostates] = ChooseCostatesToIgnore(dynamics, costateGuess)
+    if (dynamics.engineConfiguration==THRUSTER_CONFIGURATION.CG_ALIGNED_6 ||dynamics.engineConfiguration==THRUSTER_CONFIGURATION.CG_ALIGNED_CANTED_8) && (dynamics.attitudeActuator==ATTITUDE_CONTROL_TYPE.NONE)
+        % In this case the attitude 
+        % dynamics is not controllable. The solver tries to vary the p
+        % and omega costates but they have no affect on the cost
+        % function so it is unable to converge. We limit the fsolve
+        % parameters to only the first 7 of the initialCostateGuess and
+        % the solver easily converges to the optimal solution
+        
+        if (dynamics.sundman.useTransform) && (~dynamics.sundman.useSimplified)
+            initialGuess = costateGuess([1:7,14]);
+            remainingCostates =  costateGuess(8:13);
+        else
             initialGuess = costateGuess(1:7);
             remainingCostates =  costateGuess(8:end);
-        otherwise
-            initialGuess = costateGuess;
-            remainingCostates  = [];
+        end
+    else 
+        initialGuess = costateGuess;
+        remainingCostates = [];
     end
 end
+function lam0 = CombineIgnoredCostates(dynamics, costateGuess, costatesToIgnore)
+    if (dynamics.engineConfiguration==THRUSTER_CONFIGURATION.CG_ALIGNED_6 || dynamics.engineConfiguration==THRUSTER_CONFIGURATION.CG_ALIGNED_CANTED_8) && (dynamics.attitudeActuator==ATTITUDE_CONTROL_TYPE.NONE)
+        if (dynamics.sundman.useTransform) && (~dynamics.sundman.useSimplified)
+            lam0 = [costateGuess(1:7);costatesToIgnore;costateGuess(end)];
+        else
+            lam0 = [costateGuess;costatesToIgnore];
+        end
+    else
+        lam0 = costateGuess;
+    end
+end
+
 function Xdot = SixDimConstrainedOptimalControlProblem(t,X,dynamics,rho,constraint,returnDynamics)
 if nargin < 6
     returnDynamics = true;
 end
+    if ~isreal(X)||any(isnan(X))
+        stop = true;
+    end
     % states 1-6 are pos vel
     % state 7 is mass
     % states 8-13 are MRP and angular velocity
     % states 14-26 are corresponding costates. (14-19 pos vel, 20 mass,
     % 21-26 angular)
     pos = X(1:3);
-    vel = X(4:6);
     m = X(7);
     p = X(8:10);
     w = X(11:13);
-    lambda_r = X(14:16);
     lambda_v = X(17:19);
     lambda_m = X(20);
-    lambda_p = X(21:23);
     lambda_w = X(24:26);
+    if dynamics.sundman.useTransform
+        t = X(27); 
+    end 
 
     p2 = p'*p;
     pCross = [0 -p(3) p(2); p(3) 0 -p(1); -p(2) p(1) 0];
     temp = (1+p2)^2;
-
+    D_Temp = lambda_w'*dynamics.inertiaInverse; % cross product is bilinear so product rule distributes
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         
     % Translational dynamics are in a rotating reference frame
-    DCM_BodyToInertial = eye(3) - 4*(1-p2)/temp*pCross + 8/temp * (p*p');
-    DCM_InertialToLVLH = [cos(dynamics.frameRotationRate*t) sin(dynamics.frameRotationRate*t) 0;
+    D = eye(3) + (8*pCross*pCross - 4*(1-p2)*pCross)/temp;
+    G = [cos(dynamics.frameRotationRate*t) sin(dynamics.frameRotationRate*t) 0;
                           -sin(dynamics.frameRotationRate*t) cos(dynamics.frameRotationRate*t) 0;
                           0 0 1];
-    DCM_BodyToTranslationalFrame = DCM_InertialToLVLH*DCM_BodyToInertial;
+    Phi = G*D;
 
-    switch constraint.type
-        case POINTING_CONSTRAINT_TYPE.NONE
-            constraintAngle = 0;     
-        case POINTING_CONSTRAINT_TYPE.ORIGIN_CONSTANT_ANGLE
-            constraintAngle = constraint.alpha0;      
-            dalphadr=[0;0;0];
-        case POINTING_CONSTRAINT_TYPE.ORIGIN_VARIABLE_ANGLE
-            constraintAngle = constraint.angleFunc(norm(pos));      
-            dalphadr = constraint.angleFuncDerivative(pos);
-    end
-
-    eta = ones(dynamics.numEngines,1);
-    % Compute the constraint function, eta
+    eta = ones(dynamics.numEngines,1); 
+    etaPrime= zeros(dynamics.numEngines,1);
+    % Compute the constraint function, eta and etaPrime
     if constraint.type ~= POINTING_CONSTRAINT_TYPE.NONE
-        etaPrime = zeros(dynamics.numEngines,1);
-        vecEngineToTargetBodyFrame = zeros(3,dynamics.numEngines);
         for ii = 1:dynamics.numEngines
-            if constraint.simplified
-                vecEngineToTargetBodyFrame(:,ii) = pos;
+            d = dynamics.engineLocationBody(:,ii);
+            u = dynamics.thrustDirectionBody(:,ii);
+            R = constraint.targetRadius;
+            rB = Phi'*pos+d;
+            if rB'*u >= 0
+                constraintFunc = 1/R^2*(pos'*pos + 2*pos'*Phi*d+d'*d-R^2 - (rB'*u)^2);
             else
-                vecEngineToTargetBodyFrame(:,ii) = DCM_BodyToTranslationalFrame'*pos + dynamics.engineLocationBody(:,ii);
-            end 
-            constraintFunc = dot(dynamics.thrustDirectionBody(:,ii),vecEngineToTargetBodyFrame(:,ii)) - ...
-                norm(vecEngineToTargetBodyFrame(:,ii))*cos(constraintAngle);
-            eta(ii) = 1/2 * (1 - tanh(constraintFunc/constraint.epsilon));
-            etaPrime(ii) = 1/(2*constraint.epsilon)*((tanh(constraintFunc/constraint.epsilon))^2-1);
-            % If the constraint function is negative, the constraint should be INACTIVE and eta = 1 
+                constraintFunc =  1/R^2*(pos'*pos + 2*pos'*Phi*d+d'*d-R^2);
+            end
+       
+            eta(ii) = 1/2 * (1 + tanh(constraintFunc/constraint.epsilon));
+            etaPrime(ii) = 1/(2*constraint.epsilon)*(1-(tanh(constraintFunc/constraint.epsilon))^2);
+            % If the constraint function is positive, the constraint should be INACTIVE and eta = 1 
         end 
     end
 
     % Compute the switch functions and throttles
-    SwitchFunctions = ones(dynamics.numEngines,1);
-    deltaI = zeros(dynamics.numEngines,1);
-    totalTorque = zeros(3,1); totalThrustLVLH = zeros(3,1); mDot = 0;
+    SwitchFunctions = zeros(dynamics.numEngines,1);
+    delta = zeros(dynamics.numEngines,1);
+    totalTorque = zeros(3,1); totalThrustLVLH = zeros(3,1); mDot = 0; H = 0;
     for ii = 1:dynamics.numEngines
         r_cross_v = cross(dynamics.engineLocationBody(:,ii),dynamics.thrustDirectionBody(:,ii));
-        % Compute the switch functions
-        SwitchFunctions(ii) = lambda_m - 1 - dynamics.exhaustVelocity/m * lambda_v'*DCM_BodyToTranslationalFrame*dynamics.thrustDirectionBody(:,ii) ...
-            - dynamics.exhaustVelocity*dynamics.initialMass/m*lambda_w'*dynamics.inertiaInverse*r_cross_v;
-        % Compute the controls
-        deltaI(ii) = 1/2 * (1+tanh(SwitchFunctions(ii)/rho));
+        % Compute the switch functions and controls
+        SwitchFunctions(ii) = (-1 + eta(ii) * (lambda_m - dynamics.exhaustVelocity/m * lambda_v'*Phi*dynamics.thrustDirectionBody(:,ii) + ...
+            - dynamics.exhaustVelocity*D_Temp*r_cross_v));
+        delta(ii) = 1/2 * (1+tanh(SwitchFunctions(ii)/rho));
 
-        mDot = mDot - dynamics.maxThrust/dynamics.exhaustVelocity*deltaI(ii)*eta(ii);
-        % mDot = mDot - dynamics.exhaustVelocity*deltaI*eta(ii);
-        totalThrustLVLH = totalThrustLVLH + deltaI(ii)*eta(ii)*dynamics.maxThrust*DCM_BodyToTranslationalFrame*dynamics.thrustDirectionBody(:,ii);
-        totalTorque = totalTorque + dynamics.maxThrust*deltaI(ii)*eta(ii)*r_cross_v;
+        mDot = mDot - dynamics.maxThrust(ii)/dynamics.exhaustVelocity*delta(ii)*eta(ii);
+        H = H + dynamics.maxThrust(ii)/dynamics.exhaustVelocity*delta(ii);
+        totalThrustLVLH = totalThrustLVLH + delta(ii)*eta(ii)*dynamics.maxThrust(ii)*Phi*dynamics.thrustDirectionBody(:,ii);
+        totalTorque = totalTorque + dynamics.maxThrust(ii)*1e3*delta(ii)*eta(ii)*r_cross_v;
+        
+        if ~isreal(delta)
+            stop = true;
+        end
+    end
+
+    optimalControlTorque = [0;0;0];
+    switch dynamics.attitudeActuator
+        case ATTITUDE_CONTROL_TYPE.CONTROL_TORQUE
+            optimalControlTorque = (-dynamics.inertiaInverse'*lambda_w)./dynamics.torqueCostMultiplier;
+            %S = -dynamics.inertiaInverse'*lambda_w;
+            %optimalControlTorque = S./sqrt(S.^2 + rho^2) .* dynamics.maxControlTorque;
+            % for ii = 1:3
+            %     optimalControlTorque(ii) = max(min(optimalControlTorque(ii),dynamics.maxControlTorque),-dynamics.maxControlTorque);
+            % end
     end
 
     % Compute the state and costate dynamics
     switch dynamics.type
         case 'Linear' % xDot = Ax + B*Thrust, B = [0x3,Ix3];
             fDynamics = dynamics.A*X(1:6);
-            lambda_rvDot = -dynamics.A'*[lambda_r; lambda_v];
     end
-    lambda_rDot = lambda_rvDot(1:3);  
     rDot = fDynamics(1:3);
     vDot = fDynamics(4:6) + totalThrustLVLH/m;
-    B_Temp = ((1 + p2) * eye(3) + 2 * pCross*pCross + pCross);
-    pDot = 0.25 * B_Temp * w; % Testing pdot %pDot2 = .5 * (.5*(1-p2)*eye(3) + pCross + p*p')*w
-    omegaDot = dynamics.inertiaInverse*(dynamics.initialMass/m * totalTorque - cross(w,dynamics.inertia*w));
-
-    % Derivative of the MRP dynamics term in the Hamiltonian
-    lp1Dot = -.25*lambda_p'*[2*p(1), 2*p(2), 2*p(3); 2*p(2), -2*p(1), -1; 2*p(3), 1, -2*p(1)]*w;
-    lp2Dot = -.25*lambda_p'*[-2*p(2), 2*p(1), 1; 2*p(1), 2*p(2), 2*p(3); -1, 2*p(3), -2*p(2)]*w;
-    lp3Dot = -.25*lambda_p'*[-2*p(3), -1, 2*p(1); 1, -2*p(3), 2*p(2); 2*p(1), 2*p(2), 2*p(3)]*w;
-    
-    % Derivatives of the translational control term in the Hamiltonian (contains p)
-    [D_p1,D_p2,D_p3] = DerivativeDCM_BodyToIntertialWRT_p(p(1),p(2),p(3));
-    C1_Temp = dynamics.maxThrust/m * lambda_v'*DCM_InertialToLVLH * D_p1;
-    C2_Temp = dynamics.maxThrust/m * lambda_v'*DCM_InertialToLVLH * D_p2;
-    C3_Temp = dynamics.maxThrust/m * lambda_v'*DCM_InertialToLVLH * D_p3;
-    D_Temp = lambda_w'*dynamics.inertiaInverse; % cross product is bilinear so product rule distributes
-    F1 = D_p1'*DCM_InertialToLVLH'*pos;
-    F2 = D_p2'*DCM_InertialToLVLH'*pos;
-    F3 = D_p3'*DCM_InertialToLVLH'*pos;
-    F_Temp = dynamics.maxThrust/m*lambda_v'*DCM_BodyToTranslationalFrame;
-    for ii = 1:dynamics.numEngines
-        lp1Dot = lp1Dot - deltaI(ii)*eta(ii)*C1_Temp*dynamics.thrustDirectionBody(:,ii);
-        lp2Dot = lp2Dot - deltaI(ii)*eta(ii)*C2_Temp*dynamics.thrustDirectionBody(:,ii);
-        lp3Dot = lp3Dot - deltaI(ii)*eta(ii)*C3_Temp*dynamics.thrustDirectionBody(:,ii);
-        
-        % Compute derivatives of cosntraint terms here!
-        if constraint.type ~= POINTING_CONSTRAINT_TYPE.NONE
-            % eta is a function of p and r. deta/dr and deta/dp both have
-            % the following constant coefficient (Gi)
-            G_i = etaPrime(ii)*deltaI(ii)*(F_Temp*dynamics.thrustDirectionBody(:,ii) + ... % This is the translational term
-                    dynamics.maxThrust*dynamics.initialMass/m * D_Temp*...
-                        cross(dynamics.engineLocationBody(:,ii),dynamics.thrustDirectionBody(:,ii)) + ... % this is the rotational term
-                    -lambda_m*dynamics.maxThrust/dynamics.exhaustVelocity); % this is the mass term
-
-            lp1Dot = lp1Dot - G_i*(dot(F1,dynamics.thrustDirectionBody(:,ii))-cos(constraintAngle)*F1'*vecEngineToTargetBodyFrame(:,ii)/norm(vecEngineToTargetBodyFrame(:,ii)));
-            lp2Dot = lp2Dot - G_i*(dot(F2,dynamics.thrustDirectionBody(:,ii))-cos(constraintAngle)*F2'*vecEngineToTargetBodyFrame(:,ii)/norm(vecEngineToTargetBodyFrame(:,ii)));
-            lp3Dot = lp3Dot - G_i*(dot(F3,dynamics.thrustDirectionBody(:,ii))-cos(constraintAngle)*F3'*vecEngineToTargetBodyFrame(:,ii)/norm(vecEngineToTargetBodyFrame(:,ii)));
-
-            lambda_rDot = lambda_rDot - G_i* (DCM_BodyToTranslationalFrame*dynamics.thrustDirectionBody(:,ii) + sin(constraintAngle)*dalphadr*norm(vecEngineToTargetBodyFrame(:,ii)) - cos(constraintAngle)*DCM_BodyToTranslationalFrame'*vecEngineToTargetBodyFrame(:,ii)/norm(vecEngineToTargetBodyFrame(:,ii))/norm(vecEngineToTargetBodyFrame(:,ii)));
-        end
-    end
-    lambda_pDot = [lp1Dot; lp2Dot; lp3Dot];
-
-    % Derivatives of the terms containing w in the Hamiltonian
-    fw_w1Dot = D_Temp*(cross([1;0;0],dynamics.inertia*w) + cross(w,dynamics.inertia(1:3,1)));
-    fw_w2Dot = D_Temp*(cross([0;1;0],dynamics.inertia*w) + cross(w,dynamics.inertia(1:3,2)));
-    fw_w3Dot = D_Temp*(cross([0;0;1],dynamics.inertia*w) + cross(w,dynamics.inertia(1:3,3)));
-
-    lambda_wDot = -B_Temp'*lambda_p + ... % derivative of the attitude dynamics term (contains w)
-        [fw_w1Dot; fw_w2Dot; fw_w3Dot]; % derivative of the rotational dynamics terms (-w X (Iw))
-    lambda_mDot = lambda_v'*totalThrustLVLH/(m^2) + lambda_w'*dynamics.inertiaInverse*totalTorque*dynamics.initialMass/(m^2);
-
+    B_Temp = 0.25 * ((1 + p2) .* eye(3) + 2 * (pCross*pCross + pCross));
+    pDot = B_Temp * w; % Testing pdot %pDot2 = .5 * (.5*(1-p2)*eye(3) + pCross + p*p')*w
+    omegaDot = dynamics.inertiaInverse*(totalTorque+  optimalControlTorque - cross(w,dynamics.inertia*w));
+    [lambdaDot, E_p, E_r, E_t] = SimplifiedCostateDerivativesSymbolic6DOF(t,X,dynamics,delta,Phi,eta,etaPrime,constraint);
+    H = H + X(14:16)'*rDot + lambda_v'*vDot + ...
+        lambda_m*mDot + X(21:23)'*pDot + lambda_w'*omegaDot;
     if returnDynamics
-        Xdot = [rDot; vDot; mDot; pDot; omegaDot;...
-            lambda_rDot; lambda_rvDot(4:6); lambda_mDot; lambda_pDot; lambda_wDot];
-        % -dynamics.A'*lambda + [-delta*dynamics.maxThrust*dudr/m; zeros(3,1)];lambda_mdot];
-    else % return the switch functions, constraints, throttles, etc.
-        Xdot.throttles = deltaI;
+        if dynamics.sundman.useTransform
+            timeDilationTerms = 1-dynamics.sundman.theta.*exp(-SwitchFunctions.^2);
+            tPrime = prod(timeDilationTerms);
+            if dynamics.sundman.useSimplified
+                Xdot = [rDot; vDot; mDot; pDot; omegaDot;lambdaDot;1].*tPrime;
+            else
+                lambda_t = X(28);
+                tPrimeProdExcept_ith = tPrime./timeDilationTerms;
+                dtPrimedp = [0;0;0]; dtPrimedr = [0;0;0];
+                dtPrimedt = 0; dtPrimedm = 0;
+                dH_olddt = 0;
+                H = H + lambda_t;
+                for ii = 1:dynamics.numEngines
+                    lpu = lambda_v'*Phi*dynamics.thrustDirectionBody(:,ii);
+                    [lpu_t,lpu_p] = SundmanDerivatives(t,dynamics.thrustDirectionBody(1,ii),dynamics.thrustDirectionBody(2,ii),dynamics.thrustDirectionBody(3,ii), ...
+                        p(1),p(2),p(3),lambda_v(1),lambda_v(2),lambda_v(3),dynamics.frameRotationRate);
+                    coeff_dSdx = 2*dynamics.sundman.theta*SwitchFunctions(ii)*...
+                        exp(-SwitchFunctions(ii)^2) * tPrimeProdExcept_ith(ii);
+                    dtPrimedp = dtPrimedp + coeff_dSdx * (-dynamics.exhaustVelocity)/m *...
+                        (etaPrime(ii)*lpu*E_p(:,ii) + eta(ii) * lpu_p); 
+                    dtPrimedr = dtPrimedr + coeff_dSdx * (-dynamics.exhaustVelocity)/m * etaPrime(ii)*lpu *E_r(:,ii);
+                    dSidt = (-dynamics.exhaustVelocity)/m *(etaPrime(ii)*lpu*E_t(ii) + eta(ii) * lpu_t);
+                    dH_olddt = dH_olddt + dynamics.maxThrust(ii)/dynamics.exhaustVelocity * delta(ii)*dSidt;
+                    dtPrimedt = dtPrimedt + coeff_dSdx * dSidt;
+                    dtPrimedm = dtPrimedm + coeff_dSdx * dynamics.exhaustVelocity/(m^2)*eta(ii)*lpu;
+                end
+                lambda_tPrime = -H*dtPrimedt - dH_olddt*tPrime;
+                lambda_rPrime = lambdaDot(1:3).*tPrime + H*dtPrimedr;
+                lambda_vPrime = lambdaDot(4:6).*tPrime;
+                lambda_mPrime = lambdaDot(7).*tPrime + H*dtPrimedm;
+                lambda_pPrime = lambdaDot(8:10).*tPrime + H*dtPrimedp;
+                lambda_wPrime = lambdaDot(11:13).*tPrime;
+                
+                Xdot = [rDot.*tPrime; vDot.*tPrime; mDot.*tPrime; pDot.*tPrime; omegaDot.*tPrime;
+                    lambda_rPrime; lambda_vPrime; lambda_mPrime; lambda_pPrime; lambda_wPrime;
+                    tPrime; lambda_tPrime];
+            end 
+        else
+            Xdot = [rDot; vDot; mDot; pDot; omegaDot;lambdaDot];...
+        end 
+        if ~isreal(Xdot)||any(isnan(Xdot))
+            stop = true;
+        end
+    else % For constructing the solution structure. 
+        % Return the switch functions, constraints, throttles, anything else you want to log.
+        Xdot.throttles = delta;
         Xdot.etas = eta;
         Xdot.switchFunctions = SwitchFunctions;
-        Xdot.totalTorqueInertialFrame = totalTorque;
+        Xdot.totalTorqueInertialFrame = totalTorque+optimalControlTorque;
         Xdot.totalThrustTranslationalFrame = totalThrustLVLH;
+        Xdot.Hamiltonian = H;
     end
+     
 end 
-
+function [lpu_t,lpu_p] = SundmanDerivatives(t,u1,u2,u3,p1,p2,p3,lambda_v1,lambda_v2,lambda_v3,W)
+    lpu_t = u1*(lambda_v1*(W*sin(W*t)*((8*p2^2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (8*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^2 - 1) + W*cos(W*t)*((8*p1*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^2)) - lambda_v2*(W*sin(W*t)*((8*p1*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^2) - W*cos(W*t)*((8*p2^2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (8*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^2 - 1))) - u2*(lambda_v1*(W*sin(W*t)*((8*p1*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 - (p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^2) + W*cos(W*t)*((8*p1^2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (8*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^2 - 1)) - lambda_v2*(W*sin(W*t)*((8*p1^2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (8*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^2 - 1) - W*cos(W*t)*((8*p1*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 - (p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^2))) - u3*(lambda_v1*(W*sin(W*t)*((8*p1*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 + (p2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^2) - W*cos(W*t)*((8*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (p1*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^2)) + lambda_v2*(W*sin(W*t)*((8*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (p1*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^2) + W*cos(W*t)*((8*p1*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 + (p2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^2)));
+    lpu_p = [   u2*(lambda_v3*((8*p1^2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (4*p1^2 + 4*p2^2 + 4*p3^2 - 4)/(p1^2 + p2^2 + p3^2 + 1)^2 - (4*p1^2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3 - (32*p1*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3) + lambda_v1*(sin(W*t)*((32*p1^3)/(p1^2 + p2^2 + p3^2 + 1)^3 - (16*p1)/(p1^2 + p2^2 + p3^2 + 1)^2 + (32*p1*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^3) + cos(W*t)*((8*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 - (8*p1*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1^2*p2)/(p1^2 + p2^2 + p3^2 + 1)^3 + (4*p1*p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3)) + lambda_v2*(cos(W*t)*((32*p1^3)/(p1^2 + p2^2 + p3^2 + 1)^3 - (16*p1)/(p1^2 + p2^2 + p3^2 + 1)^2 + (32*p1*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^3) - sin(W*t)*((8*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 - (8*p1*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1^2*p2)/(p1^2 + p2^2 + p3^2 + 1)^3 + (4*p1*p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3))) - u3*(lambda_v1*(sin(W*t)*((8*p1^2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (4*p1^2 + 4*p2^2 + 4*p3^2 - 4)/(p1^2 + p2^2 + p3^2 + 1)^2 - (4*p1^2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3 + (32*p1*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3) - cos(W*t)*((8*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 + (8*p1*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1^2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3 - (4*p1*p2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3)) - lambda_v3*((32*p1^3)/(p1^2 + p2^2 + p3^2 + 1)^3 - (16*p1)/(p1^2 + p2^2 + p3^2 + 1)^2 + (32*p1*p2^2)/(p1^2 + p2^2 + p3^2 + 1)^3) + lambda_v2*(cos(W*t)*((8*p1^2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (4*p1^2 + 4*p2^2 + 4*p3^2 - 4)/(p1^2 + p2^2 + p3^2 + 1)^2 - (4*p1^2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3 + (32*p1*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3) + sin(W*t)*((8*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 + (8*p1*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1^2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3 - (4*p1*p2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3))) + u1*(lambda_v3*((8*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (8*p1*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1^2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3 + (4*p1*p2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3) + lambda_v1*(cos(W*t)*((32*p1*p2^2)/(p1^2 + p2^2 + p3^2 + 1)^3 + (32*p1*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^3) + sin(W*t)*((8*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (8*p1*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1^2*p2)/(p1^2 + p2^2 + p3^2 + 1)^3 - (4*p1*p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3)) + lambda_v2*(cos(W*t)*((8*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (8*p1*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1^2*p2)/(p1^2 + p2^2 + p3^2 + 1)^3 - (4*p1*p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3) - sin(W*t)*((32*p1*p2^2)/(p1^2 + p2^2 + p3^2 + 1)^3 + (32*p1*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^3)))
+                u3*(lambda_v3*((32*p2^3)/(p1^2 + p2^2 + p3^2 + 1)^3 - (16*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (32*p1^2*p2)/(p1^2 + p2^2 + p3^2 + 1)^3) + lambda_v1*(cos(W*t)*((8*p2^2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (4*p1^2 + 4*p2^2 + 4*p3^2 - 4)/(p1^2 + p2^2 + p3^2 + 1)^2 - (4*p2^2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3 - (32*p1*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3) + sin(W*t)*((8*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (8*p1*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p2^2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3 + (4*p1*p2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3)) - lambda_v2*(sin(W*t)*((8*p2^2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (4*p1^2 + 4*p2^2 + 4*p3^2 - 4)/(p1^2 + p2^2 + p3^2 + 1)^2 - (4*p2^2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3 - (32*p1*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3) - cos(W*t)*((8*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (8*p1*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p2^2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3 + (4*p1*p2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3))) - u1*(lambda_v3*((8*p2^2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (4*p1^2 + 4*p2^2 + 4*p3^2 - 4)/(p1^2 + p2^2 + p3^2 + 1)^2 - (4*p2^2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3 + (32*p1*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3) - lambda_v1*(cos(W*t)*((32*p2^3)/(p1^2 + p2^2 + p3^2 + 1)^3 - (16*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (32*p2*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^3) + sin(W*t)*((8*p1)/(p1^2 + p2^2 + p3^2 + 1)^2 + (8*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1*p2^2)/(p1^2 + p2^2 + p3^2 + 1)^3 - (4*p2*p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3)) + lambda_v2*(sin(W*t)*((32*p2^3)/(p1^2 + p2^2 + p3^2 + 1)^3 - (16*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (32*p2*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^3) - cos(W*t)*((8*p1)/(p1^2 + p2^2 + p3^2 + 1)^2 + (8*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1*p2^2)/(p1^2 + p2^2 + p3^2 + 1)^3 - (4*p2*p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3))) + u2*(lambda_v3*((8*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 + (8*p1*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p2^2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3 - (4*p1*p2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3) + lambda_v1*(cos(W*t)*((8*p1)/(p1^2 + p2^2 + p3^2 + 1)^2 - (8*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1*p2^2)/(p1^2 + p2^2 + p3^2 + 1)^3 + (4*p2*p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3) + sin(W*t)*((32*p1^2*p2)/(p1^2 + p2^2 + p3^2 + 1)^3 + (32*p2*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^3)) + lambda_v2*(cos(W*t)*((32*p1^2*p2)/(p1^2 + p2^2 + p3^2 + 1)^3 + (32*p2*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^3) - sin(W*t)*((8*p1)/(p1^2 + p2^2 + p3^2 + 1)^2 - (8*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1*p2^2)/(p1^2 + p2^2 + p3^2 + 1)^3 + (4*p2*p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3)))
+                u1*(lambda_v3*((8*p1)/(p1^2 + p2^2 + p3^2 + 1)^2 - (8*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^3 + (4*p2*p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3) + lambda_v1*(sin(W*t)*((8*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (4*p1^2 + 4*p2^2 + 4*p3^2 - 4)/(p1^2 + p2^2 + p3^2 + 1)^2 - (4*p3^2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3 - (32*p1*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3) + cos(W*t)*((32*p3^3)/(p1^2 + p2^2 + p3^2 + 1)^3 - (16*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 + (32*p2^2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3)) + lambda_v2*(cos(W*t)*((8*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (4*p1^2 + 4*p2^2 + 4*p3^2 - 4)/(p1^2 + p2^2 + p3^2 + 1)^2 - (4*p3^2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3 - (32*p1*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3) - sin(W*t)*((32*p3^3)/(p1^2 + p2^2 + p3^2 + 1)^3 - (16*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 + (32*p2^2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3))) + u2*(lambda_v3*((8*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (8*p1*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p2*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^3 - (4*p1*p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3) - lambda_v1*(cos(W*t)*((8*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (4*p1^2 + 4*p2^2 + 4*p3^2 - 4)/(p1^2 + p2^2 + p3^2 + 1)^2 - (4*p3^2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3 + (32*p1*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3) - sin(W*t)*((32*p3^3)/(p1^2 + p2^2 + p3^2 + 1)^3 - (16*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 + (32*p1^2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3)) + lambda_v2*(sin(W*t)*((8*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (4*p1^2 + 4*p2^2 + 4*p3^2 - 4)/(p1^2 + p2^2 + p3^2 + 1)^2 - (4*p3^2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3 + (32*p1*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3) + cos(W*t)*((32*p3^3)/(p1^2 + p2^2 + p3^2 + 1)^3 - (16*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 + (32*p1^2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3))) + u3*(lambda_v3*((32*p1^2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3 + (32*p2^2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3) + lambda_v1*(cos(W*t)*((8*p1)/(p1^2 + p2^2 + p3^2 + 1)^2 + (8*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^3 - (4*p2*p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3) + sin(W*t)*((8*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 - (8*p1*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p2*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^3 + (4*p1*p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3)) + lambda_v2*(cos(W*t)*((8*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 - (8*p1*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p2*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^3 + (4*p1*p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3) - sin(W*t)*((8*p1)/(p1^2 + p2^2 + p3^2 + 1)^2 + (8*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^3 - (4*p2*p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3)))
+            ];
+end
 function trajOut = costFunction(lam0_guess,tspan, x0, xf, p0, pf, ...
     w0, wf,rho,constraint,dynamics,costatesToIgnore,opts_ode,getSol)
-
+    
+    lambda_0 = CombineIgnoredCostates(dynamics, lam0_guess, costatesToIgnore); 
+    endTimeReached = false;
+    if dynamics.sundman.useTransform
+        opts_ode = odeset(opts_ode, Event=@BothEvents);
+        tspan = tspan*2000; 
+        if dynamics.sundman.useSimplified
+            X0 = [x0; p0; w0;lambda_0;0];
+        else 
+            X0 = [x0; p0; w0;lambda_0(1:(end-1));0;lambda_0(end)];
+        end
+    else
+        X0 = [x0; p0; w0;lambda_0];
+        opts_ode = odeset(opts_ode, Event=@MRP_InShadowSet);
+    end
     useShadowSet = true;
     if useShadowSet
         maxSetChanges = 100; tOut = 0; ii = 0;
-        opts_ode = odeset(opts_ode, Event=@MRP_InShadowSet);
-        TSPAN = tspan; X0 = [x0; p0; w0;lam0_guess;costatesToIgnore];
+        TSPAN = tspan; 
         t = []; X = [];
-        while (ii<maxSetChanges) && (tOut(end) < tspan(end))
+        while (ii<maxSetChanges) && (tOut(end) < tspan(end)) && ~endTimeReached
             % Solve one arc
-            [tOut,XOut] = ode45(@SixDimConstrainedOptimalControlProblem,...
+            [tOut,XOut,te,ye,ie] = ode45(@SixDimConstrainedOptimalControlProblem,...
                 TSPAN,X0,opts_ode,dynamics,rho,constraint);
-            
+            if ie == 1
+                endTimeReached = true;
+            end
             % Combine trajectory arcs
             t = [t; tOut]; 
             X = [X; XOut];
-
+            
             % Prepare ODE for next arc
             TSPAN = [tOut(end),tspan(end)];
             X0 = XOut(end,:); 
@@ -247,13 +300,14 @@ function trajOut = costFunction(lam0_guess,tspan, x0, xf, p0, pf, ...
             if normFinalMRP > .2
                 X0(8:10) = -X0(8:10)./(normFinalMRP^2); % Switch from shadow set to main set 
             end 
+            ii=ii+1;
         end
-        if ii==maxSetChanges
+        if ii>=maxSetChanges
             warning('Max number of shadow set switches');
         end
     else
         [t,X] = ode45(@SixDimConstrainedOptimalControlProblem,...
-            tspan,[x0; p0; w0;lam0_guess;costatesToIgnore],opts_ode,dynamics,rho,constraint);
+            tspan,[x0; p0; w0;lambda_0],opts_ode,dynamics,rho,constraint);
     end
     % states 1-6 are pos vel
     % state 7 is mass
@@ -261,15 +315,35 @@ function trajOut = costFunction(lam0_guess,tspan, x0, xf, p0, pf, ...
     % states 14-26 are corresponding costates. (14-19 pos vel, 20 mass,
     % 21-26 angular)
     % Compute error from shadow set and normal set
-    normOriginal = norm(X(end,8:10)-pf');
-    MRP_Error = X(end,8:10)-pf';
+    if dynamics.sundman.useTransform
+        xODE_Final = ye;
+    else
+        xODE_Final = X(end,:);
+    end
+    normOriginal = norm(xODE_Final(8:10)-pf');
+    MRP_Error = xODE_Final(8:10)-pf';
     if normOriginal > 0.2 % stop switching errors
-        shadowX_Final = -X(end,8:10)/(norm(X(end,8:10))^2);
+        shadowX_Final = -xODE_Final(8:10)/(norm(xODE_Final(8:10))^2);
         if normOriginal > norm(shadowX_Final-pf')
             MRP_Error = shadowX_Final-pf';
         end
     end 
-    err = [X(end,1:6)-xf',MRP_Error,X(end,11:13)-wf',X(end,20)]; 
+
+    % Scale errors. pos, vel are in km, km/sec. So 1e-6 corresponds to
+    % accuracy of 1mm. Want angVel to have accuracy of .1mm/sec (1e-7)
+    % MRP = n*tan(theta/4). Angular error of 1degree is 0.0044
+    % ang vel is in rad/s. ang rate error of .05deg/s is 8.7266e-04
+    velScale = 10;
+    MRP_Scale = 1e-6/.0044;
+    omega_Scale = 1e-6/(8.7266e-04);
+    if dynamics.finalAttitudeFree
+        MRP_Error = xODE_Final(21:23); % costates = 0 
+        MRP_Scale = 1;
+    end
+    scale = 100.*[1,1,1,velScale,velScale,velScale,MRP_Scale,MRP_Scale,MRP_Scale,...
+        omega_Scale,omega_Scale,omega_Scale,1];
+    errorUnscaled = [xODE_Final(1:6)-xf',MRP_Error,xODE_Final(11:13)-wf',xODE_Final(20)]; 
+    err = errorUnscaled.*scale;
 
     if getSol 
         trajOut.err = err; 
@@ -278,6 +352,21 @@ function trajOut = costFunction(lam0_guess,tspan, x0, xf, p0, pf, ...
     else
         trajOut = err; 
     end 
+end
+function [value,isterminal,direction] = BothEvents(t,X,dynamics,rho,constraint)
+    [value1,isterminal1,direction1] = FinalTimeReachedEvent(t,X,dynamics,rho,constraint);
+    [value2,isterminal2,direction2] = MRP_InShadowSet(t,X,dynamics,rho,constraint);
+    value = [value1,value2];
+    isterminal = [isterminal1,isterminal2];
+    direction = [direction1,direction2];
+end
+function [value,isterminal,direction] = FinalTimeReachedEvent(t,X,dynamics,rho,constraint)
+    value = X(27) - dynamics.finalT;
+    if value > 0
+        stop = true;
+    end
+    isterminal = 1;
+    direction = 1;
 end
 
 function [value,isterminal,direction] = MRP_InShadowSet(~,X,dynamics,rho,constraint)
@@ -294,18 +383,3 @@ function solStruct = emptySolutionStruct(problemParameters,solverParameters)
     solStruct.problemParameters = problemParameters;
     solStruct.solverParameters = solverParameters;
 end 
-
-function [D_p1,D_p2,D_p3] = DerivativeDCM_BodyToIntertialWRT_p(p1,p2,p3)
-    D_p1 =  [[                                                                                                               (16*p1)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1^3)/(p1^2 + p2^2 + p3^2 + 1)^3,                        (8*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 - (8*p1*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1^2*p2)/(p1^2 + p2^2 + p3^2 + 1)^3 + (4*p1*p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3,                        (8*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 + (8*p1*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1^2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3 - (4*p1*p2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3]
-            [(8*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (8*p1*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1^2*p2)/(p1^2 + p2^2 + p3^2 + 1)^3 - (4*p1*p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3,                                                                                                                                                                        -(32*p1*p2^2)/(p1^2 + p2^2 + p3^2 + 1)^3, (4*p1^2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3 - (4*p1^2 + 4*p2^2 + 4*p3^2 - 4)/(p1^2 + p2^2 + p3^2 + 1)^2 - (8*p1^2)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3]
-            [(8*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (8*p1*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1^2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3 + (4*p1*p2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3, (8*p1^2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (4*p1^2 + 4*p2^2 + 4*p3^2 - 4)/(p1^2 + p2^2 + p3^2 + 1)^2 - (4*p1^2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3 - (32*p1*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3,                                                                                                                                                                        -(32*p1*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^3]
-            ];
-    D_p2 =  [[                                                                                                                                                                       -(32*p1^2*p2)/(p1^2 + p2^2 + p3^2 + 1)^3, (8*p1)/(p1^2 + p2^2 + p3^2 + 1)^2 - (8*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1*p2^2)/(p1^2 + p2^2 + p3^2 + 1)^3 + (4*p2*p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3, (8*p2^2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (4*p1^2 + 4*p2^2 + 4*p3^2 - 4)/(p1^2 + p2^2 + p3^2 + 1)^2 - (4*p2^2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3 - (32*p1*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3]
-            [                       (8*p1)/(p1^2 + p2^2 + p3^2 + 1)^2 + (8*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1*p2^2)/(p1^2 + p2^2 + p3^2 + 1)^3 - (4*p2*p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3,                                                                                                                (16*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p2^3)/(p1^2 + p2^2 + p3^2 + 1)^3,                        (8*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (8*p1*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p2^2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3 + (4*p1*p2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3]
-            [(4*p2^2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3 - (4*p1^2 + 4*p2^2 + 4*p3^2 - 4)/(p1^2 + p2^2 + p3^2 + 1)^2 - (8*p2^2)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3, (8*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 + (8*p1*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p2^2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3 - (4*p1*p2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3,                                                                                                                                                                        -(32*p2*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^3]
-            ];
-    D_p3 =  [[                                                                                                                                                                       -(32*p1^2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3, (4*p3^2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3 - (4*p1^2 + 4*p2^2 + 4*p3^2 - 4)/(p1^2 + p2^2 + p3^2 + 1)^2 - (8*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3, (8*p1)/(p1^2 + p2^2 + p3^2 + 1)^2 + (8*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^3 - (4*p2*p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3]
-            [(8*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (4*p1^2 + 4*p2^2 + 4*p3^2 - 4)/(p1^2 + p2^2 + p3^2 + 1)^2 - (4*p3^2*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3 - (32*p1*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3,                                                                                                                                                                        -(32*p2^2*p3)/(p1^2 + p2^2 + p3^2 + 1)^3, (8*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 - (8*p1*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p2*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^3 + (4*p1*p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3]
-            [                       (8*p1)/(p1^2 + p2^2 + p3^2 + 1)^2 - (8*p2*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p1*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^3 + (4*p2*p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3,                        (8*p2)/(p1^2 + p2^2 + p3^2 + 1)^2 + (8*p1*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p2*p3^2)/(p1^2 + p2^2 + p3^2 + 1)^3 - (4*p1*p3*(4*p1^2 + 4*p2^2 + 4*p3^2 - 4))/(p1^2 + p2^2 + p3^2 + 1)^3,                                                                                                                (16*p3)/(p1^2 + p2^2 + p3^2 + 1)^2 - (32*p3^3)/(p1^2 + p2^2 + p3^2 + 1)^3]
-    ];
-end

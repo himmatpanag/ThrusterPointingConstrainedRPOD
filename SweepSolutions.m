@@ -1,4 +1,7 @@
-function newSols = SweepSolutions(initialSolution,type,values,dynamicStepSize)
+function newSols = SweepSolutions(initialSolution,type,values,dynamicStepSize,oldSweep)
+if nargin < 5
+    oldSweep = false; 
+end
 if nargin < 4
     dynamicStepSize = true;
 end
@@ -87,7 +90,7 @@ while ii < N+1
             targetValue = prevValue*rate;
             stepSize = (targetValue-prevValue)/(numFails+1);
             solverParameters.rho = prevValue + stepSize; 
-            if targetValue*rate < finalRho
+            if prevStepPass && (prevValue <= finalRho)
                 break
             end
         case 'epsilon'
@@ -95,7 +98,7 @@ while ii < N+1
             targetValue = prevValue*rate;
             stepSize = (targetValue-prevValue)/(numFails+1);
             problemParameters.constraint.epsilon = prevValue + stepSize;
-            if targetValue*rate < final_epsilon
+            if prevStepPass && (prevValue <= final_epsilon)
                 break
             end
             fprintf('prevValue %f\t stepSize\t%f newValue%f\t',prevValue,stepSize,(prevValue+stepSize));
@@ -112,21 +115,42 @@ while ii < N+1
             solverParameters.rho = prevValue + stepSize;             
         case 'rhoepsilon'
             if prevStepPass, prevValue = solverParameters.rho; prevValueEps = problemParameters.constraint.epsilon; end             
+            if numel(values) > 1, finalEps = values(2); else, finalEps = finalRho; end
             targetValue = prevValue*rate;
             stepSize = (targetValue-prevValue)/(numFails+1);
 
             targetValueEps = prevValueEps*rate;
             stepSizeEps = (targetValueEps-prevValueEps)/(numFails+1);
-            if (targetValueEps*rate >= finalRho) % only update parameters if target has not been reached
+            if (prevValueEps >= finalEps) % only update parameters if target has not been reached
                 problemParameters.constraint.epsilon = prevValueEps + stepSizeEps;
             end
-            if (targetValue*rate >= finalRho) 
+            if (prevValue >= finalRho) 
                 solverParameters.rho = prevValue + stepSize; 
             end
 
-            if (targetValue*rate < finalRho) && (targetValueEps*rate < finalRho)
+            if prevStepPass && (prevValue < finalRho) && (prevValueEps < finalEps)
                 break
             end
+        case 'rhokappa'
+            if prevStepPass, prevValue = solverParameters.rho; prevValueKappa = problemParameters.dynamics.torqueCostMultiplier; end    
+            if numel(values) > 1, finalKappa = values(2); else, finalKappa = finalRho; end
+            targetValue = prevValue*rate;
+            stepSize = (targetValue-prevValue)/(numFails+1);
+
+            targetValueKappa = prevValueKappa*rate;
+            stepSizeKappa = (targetValueKappa-prevValueKappa)/(numFails+1);
+            if (prevValueKappa >= finalKappa) % only update parameters if target has not been reached
+                problemParameters.dynamics.torqueCostMultiplier = prevValueKappa + stepSizeKappa;
+            end
+            if (prevValue >= finalRho) 
+                solverParameters.rho = prevValue + stepSize; 
+            end
+
+            if prevStepPass && (prevValue < finalRho) && (prevValueKappa < finalKappa)
+                break
+            end
+
+
         case 'ThrusterConfig' % quick and dirty implementation of thrust value 
             if prevStepPass, prevValue = problemParameters.dynamics.maxThrust(end); end             
             targetValue = values(ii);
@@ -157,7 +181,21 @@ while ii < N+1
 
     fprintf('iterIdx = %d\trho=%f\n',iter,solverParameters.rho);
     if numel(solverParameters.initialCostateGuess) > 10
-        solveFunc = @Solve6DOFPointingConstrainedControlProblem;
+        if oldSweep 
+            solveFunc = @OLD_Solve6DOFPointingConstrainedControlProblem;
+        else
+            solveFunc = @Solve6DOFPointingConstrainedControlProblem;
+        end
+        if solverParameters.rho < .01
+            solverParameters.fSolveOptions.MaxIterations = 30;
+        else
+            solverParameters.fSolveOptions.MaxIterations = 300;
+        end
+        solverParameters.fSolveOptions.MaxFunctionEvaluations = 2000;
+        %  optimoptions('fsolve','Display','iter','MaxFunEvals',1e3,...
+        % 'MaxIter',3e1,'TolFun',1e-12,'TolX',1e-12,'StepTolerance',1e-12,...
+        % 'UseParallel',true); % fsolve    
+    
     else 
         solveFunc = @SolvePointingConstrainedControlProblem;
     end 
@@ -178,6 +216,13 @@ while ii < N+1
     end 
 
     solution = solveFunc(problemParameters,solverParameters);
+
+    debug = false; 
+    if debug % Put a breakpoint in here to plot latest solutions
+        sol = newSols(end-1);
+        PlotSolution.ConvergedCostateTrace(newSols(1:(end-1)))
+        PlotSolution.RotationalSummary(sol); PlotSolution.ThrustProfileAllEngines(sol)
+    end
 
     if isfield(solution,'finalStateError')
         solPass = (norm(solution.finalStateError)<1e-8)|| ( ~any(~solution.solutionFound));

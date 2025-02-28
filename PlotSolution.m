@@ -85,12 +85,22 @@ methods(Static)
         else 
             axes(axIn);
         end
-        tits = {'\lambda_{r1}','\lambda_{r2}','\lambda_{r3}','\lambda_{v1}','\lambda_{v2}','\lambda_{v3}','\lambda_{m}'};
-        for ii = 1:7
-            subplot(4,2,ii);
-            grid on; hold on;
-            plot(solution.t,solution.x(:,ii+7)); title(tits{ii})
-            xlabel('Time (s)')
+        if size(solution.x,2)==26
+            tits = {'\lambda_{r1}','\lambda_{r2}','\lambda_{r3}','\lambda_{v1}','\lambda_{v2}','\lambda_{v3}','\lambda_{m}','\lambda_{p1}','\lambda_{p2}','\lambda_{p3}','\lambda_{\omega_1}','\lambda_{\omega_2}','\lambda_{\omega_3}'};
+            for ii = 1:13
+                subplot(5,3,ii);
+                grid on; hold on;
+                plot(solution.t,solution.x(:,ii+13)); title(tits{ii})
+                xlabel('Time (s)')
+            end
+        else
+            tits = {'\lambda_{r1}','\lambda_{r2}','\lambda_{r3}','\lambda_{v1}','\lambda_{v2}','\lambda_{v3}','\lambda_{m}'};
+            for ii = 1:7
+                subplot(4,2,ii);
+                grid on; hold on;
+                plot(solution.t,solution.x(:,ii+7)); title(tits{ii})
+                xlabel('Time (s)')
+            end
         end
     end
 
@@ -567,6 +577,9 @@ methods(Static)
             else
                 rotVec = cross(unitVec,[0;0;1]);
             end
+            if ~isreal(rotAngle)
+                rotAngle = 180;
+            end
             rotate(s,rotVec,-rotAngle,origin);
         end
     end
@@ -816,6 +829,23 @@ methods(Static)
         end 
         legend('show','Location','best')
         ylabel('Force N'); xlabel('Time (s)');
+    end
+
+    function CostBreakdown(sol)
+        figure; grid on; hold on; 
+        thrustCost = zeros(numel(sol.t),1);
+        for ii = 1:sol.problemParameters.dynamics.numEngines
+            thrustCost = thrustCost + cumtrapz(sol.t,sol.throttle(ii,:).*sol.eta(ii,:))'.*sol.problemParameters.dynamics.maxThrust(ii)/sol.problemParameters.dynamics.exhaustVelocity;
+        end
+        massCost = -(sol.x(:,7)-sol.x(1,7));
+        
+        torqueCost = cumtrapz(sol.t,(vecnorm(sol.torqueInertialFrame)).^2).*sol.problemParameters.dynamics.torqueCostMultiplier;
+        plot(sol.t,thrustCost,'DisplayName','Thrust Cost');
+        plot(sol.t,massCost,'DisplayName','Mass Cost');
+        plot(sol.t,torqueCost,'DisplayName','Torque Cost');
+        legend('show','Location','best');
+        xlabel('Time'); title('Cost of control torque vs thrust');
+        warning('Not suitable for RCS thrusters yet!'); % Need to separate the RW torque cost from the thruster torques
     end
 end 
 end 

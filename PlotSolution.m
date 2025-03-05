@@ -509,6 +509,7 @@ methods(Static)
         end 
     end 
     
+    %% Functions specifically for 6DOF 
     function PlotOrientationChaserRelativeToTranslationalFrame(p,pos,t,problemParameters,ax)
         % Plotting the orientation of the chaser in the translational frame is misleading, since the target may be rotating with some angular velocity relative to thte inertial frame and it is not clear what this rate is. 
         % If we asssume the target is not rotating relative to the inertial frame, then by the end of the trajectory, it will have a slightly different orientation (w.r.t.) to the translational frame. 
@@ -597,7 +598,7 @@ methods(Static)
 
     function hFig = ThrustProfileAllEngines(solution)
         % Plot the thrust profiles of each engine, create a subplot for each engine
-        hFig = figure;
+        hFig = figure('Name','ThrustProf');
         numEngines = solution.problemParameters.dynamics.numEngines;
         % create grid of subplots based on number of engines
         numCols = ceil(sqrt(numEngines));
@@ -609,9 +610,33 @@ methods(Static)
             plot(solution.t,solution.eta(ii,:), '--','LineWidth',3,'DisplayName','\eta');
             yyaxis right
             plot(solution.t,solution.switchFunction(ii,:), 'DisplayName','Switch Function');
-            title(['Engine ',num2str(ii)]); ylabel('Switch Function')
+            titleStr = ['Engine ',num2str(ii)];
+            if ii==1, titleStr = [titleStr,', \rho=',num2str(solution.solverParameters.rho)]; 
+            elseif (ii==2 && isfield(solution.problemParameters.constraint,'epsilon')), titleStr = [titleStr,', \epsilon=',num2str(solution.problemParameters.constraint.epsilon)]; 
+            elseif (ii==3 && isfield(solution.problemParameters.dynamics,'torqueCostMultiplier')), titleStr = [titleStr,', \kappa=',num2str(solution.problemParameters.dynamics.torqueCostMultiplier)]; end
+            title(titleStr); ylabel('Switch Function')
             yyaxis left
             if ii==1, legend('show','Location','best'); end
+            if isfield(solution,'constraint')
+                kk = 1; kkMax = 5; constraintActive = solution.constraint(ii,:)<0; 
+                constraintRegionIdx = find(constraintActive,1,'first');
+                clear idxOn idxOff
+                while (kk < kkMax) && (~isempty(constraintRegionIdx))% max number of shaded regions to plot
+                    idxOn(kk) = constraintRegionIdx;
+                    constraintOffIdx = constraintRegionIdx + find(~constraintActive(idxOn(kk):end),1,'first')-1;
+                    if isempty(constraintOffIdx)
+                        idxOff(kk) = numel(solution.t);
+                    else
+                        idxOff(kk) = constraintOffIdx;
+                    end
+                    constraintActive(idxOn(kk):idxOff(kk)) = false;
+                    constraintRegionIdx = find(constraintActive,1,'first');
+                    kk = kk+1;
+                end
+                if kk > 1
+                    xregion(solution.t(idxOn),solution.t(idxOff),'FaceColor','r','FaceAlpha',.2,'EdgeAlpha',0,'HandleVisibility','off');
+                end
+            end
         end
         linkaxes(ax)
     end
@@ -740,7 +765,7 @@ methods(Static)
         if nargin < 2, figure; ax = gca; end
         axes(ax);AxBruh = 'xyz'; grid on; hold on; 
         for ii = 1:3
-            plot(sol.t,sol.torqueInertialFrame(ii,:),'DisplayName',['\omega_',AxBruh(ii)])
+            plot(sol.t,sol.torqueInertialFrame(ii,:),'DisplayName',['T_',AxBruh(ii)])
         end 
         legend('show','Location','best')
         ylabel('Torque Nm'); xlabel('Time (s)');
@@ -767,6 +792,10 @@ methods(Static)
         elseif isfield(sols(1).problemParameters.constraint,'epsilon') && sols(1).problemParameters.constraint.epsilon ~= sols(3).problemParameters.constraint.epsilon
             for ii = 1:N, xVals(ii) = sols(ii).problemParameters.constraint.epsilon; end 
             xLab = 'Constraint smoothing parameter \epsilon'; 
+            plotFun = @semilogx;
+        elseif isfield(sols(1).problemParameters.dynamics,'torqueCostMultiplier') && sols(1).problemParameters.dynamics.torqueCostMultiplier ~= sols(3).problemParameters.dynamics.torqueCostMultiplier
+            for ii = 1:N, xVals(ii) = sols(ii).problemParameters.dynamics.torqueCostMultiplier; end 
+            xLab = 'Torque Cost smoothing parameter \kappa'; 
             plotFun = @semilogx;
         elseif sols(1).problemParameters.dynamics.maxThrust(1) ~=sols(4).problemParameters.dynamics.maxThrust(1)
             for ii = 1:N, xVals(ii) = sols(ii).problemParameters.dynamics.maxThrust(end); end 

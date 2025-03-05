@@ -19,7 +19,7 @@ function solution = Solve6DOFPointingConstrainedControlProblem(problemParameters
             problemParameters.w0,problemParameters.wf,...
             solverParameters.rho,...
             problemParameters.constraint,...
-            problemParameters.dynamics,remainingCostates, ...ß
+            problemParameters.dynamics,remainingCostates, ...
             solverParameters.odeOptions,false);
     end
     solution = emptySolutionStruct(problemParameters,solverParameters);
@@ -49,6 +49,7 @@ function solution = Solve6DOFPointingConstrainedControlProblem(problemParameters
         solution.x = X_minU;
         solution.throttle = zeros(problemParameters.dynamics.numEngines,numel(solution.t));
         solution.eta = zeros(problemParameters.dynamics.numEngines,numel(solution.t));
+        solution.constraint = zeros(problemParameters.dynamics.numEngines,numel(solution.t));
         solution.switchFunction = zeros(problemParameters.dynamics.numEngines,numel(solution.t));
         solution.torqueInertialFrame = zeros(3,numel(solution.t),1);
         solution.thrustTranslationalFrame = zeros(3,numel(solution.t),1);
@@ -58,6 +59,7 @@ function solution = Solve6DOFPointingConstrainedControlProblem(problemParameters
                 problemParameters.constraint,false);
             solution.throttle(:,ii) = optimalSolStruct.throttles;
             solution.eta(:,ii) = optimalSolStruct.etas;
+            solution.constraint(:,ii) = optimalSolStruct.constraint;
             solution.switchFunction(:,ii) = optimalSolStruct.switchFunctions;
             solution.torqueInertialFrame(:,ii) = optimalSolStruct.totalTorqueInertialFrame;
             solution.thrustTranslationalFrame(:,ii) = optimalSolStruct.totalThrustTranslationalFrame;
@@ -101,9 +103,6 @@ function Xdot = SixDimConstrainedOptimalControlProblem(t,X,dynamics,rho,constrai
 if nargin < 6
     returnDynamics = true;
 end
-    if ~isreal(X)||any(isnan(X))
-        stop = true;
-    end
     % states 1-6 are pos vel
     % state 7 is mass
     % states 8-13 are MRP and angular velocity
@@ -132,7 +131,7 @@ end
                           0 0 1];
     Phi = G*D;
 
-    eta = ones(dynamics.numEngines,1); 
+    eta = ones(dynamics.numEngines,1); constraintFunc = ones(dynamics.numEngines,1);
     etaPrime= zeros(dynamics.numEngines,1);
     % Compute the constraint function, eta and etaPrime
     if constraint.type ~= POINTING_CONSTRAINT_TYPE.NONE
@@ -142,13 +141,13 @@ end
             R = constraint.targetRadius;
             rB = Phi'*pos+d;
             if rB'*u >= 0
-                constraintFunc = 1/R^2*(pos'*pos + 2*pos'*Phi*d+d'*d-R^2 - (rB'*u)^2);
+                constraintFunc(ii) = 1/R^2*(pos'*pos + 2*pos'*Phi*d+d'*d-R^2 - (rB'*u)^2);
             else
-                constraintFunc =  1/R^2*(pos'*pos + 2*pos'*Phi*d+d'*d-R^2);
+                constraintFunc(ii) =  1/R^2*(pos'*pos + 2*pos'*Phi*d+d'*d-R^2);
             end
        
-            eta(ii) = 1/2 * (1 + tanh(constraintFunc/constraint.epsilon));
-            etaPrime(ii) = 1/(2*constraint.epsilon)*(1-(tanh(constraintFunc/constraint.epsilon))^2);
+            eta(ii) = 1/2 * (1 + tanh(constraintFunc(ii)/constraint.epsilon));
+            etaPrime(ii) = 1/(2*constraint.epsilon)*(1-(tanh(constraintFunc(ii)/constraint.epsilon))^2);
             % If the constraint function is positive, the constraint should be INACTIVE and eta = 1 
         end 
     end
@@ -167,11 +166,7 @@ end
         mDot = mDot - dynamics.maxThrust(ii)/dynamics.exhaustVelocity*delta(ii)*eta(ii);
         H = H + dynamics.maxThrust(ii)/dynamics.exhaustVelocity*delta(ii);
         totalThrustLVLH = totalThrustLVLH + delta(ii)*eta(ii)*dynamics.maxThrust(ii)*Phi*dynamics.thrustDirectionBody(:,ii);
-        totalTorque = totalTorque + dynamics.maxThrust(ii)*1e3*delta(ii)*eta(ii)*r_cross_v;
-        
-        if ~isreal(delta)
-            stop = true;
-        end
+        totalTorque = totalTorque + dynamics.maxThrust(ii)*1e3*delta(ii)*eta(ii)*r_cross_v;   
     end
 
     optimalControlTorque = [0;0;0];
@@ -189,13 +184,15 @@ end
     switch dynamics.type
         case 'Linear' % xDot = Ax + B*Thrust, B = [0x3,Ix3];
             fDynamics = dynamics.A*X(1:6);
+        case 'Relative_CRTBP'
+            
     end
     rDot = fDynamics(1:3);
-    vDot = fDynamics(4:6) + totalThrustLVLH/m;
+    vDot = fDynamics(4:6) + totalThrustLVLH/m;  
     B_Temp = 0.25 * ((1 + p2) .* eye(3) + 2 * (pCross*pCross + pCross));
     pDot = B_Temp * w; % Testing pdot %pDot2 = .5 * (.5*(1-p2)*eye(3) + pCross + p*p')*w
     omegaDot = dynamics.inertiaInverse*(totalTorque+  optimalControlTorque - cross(w,dynamics.inertia*w));
-    [lambdaDot, E_p, E_r, E_t] = SimplifiedCostateDerivativesSymbolic6DOF(t,X,dynamics,delta,Phi,eta,etaPrime,constraint);
+    [lambdaDot, E_p, E_r, E_t] = CostateDerivativesSymbolic6DOF(t,X,dynamics,delta,Phi,eta,etaPrime,constraint);
     H = H + X(14:16)'*rDot + lambda_v'*vDot + ...
         lambda_m*mDot + X(21:23)'*pDot + lambda_w'*omegaDot;
     if returnDynamics
@@ -239,9 +236,6 @@ end
         else
             Xdot = [rDot; vDot; mDot; pDot; omegaDot;lambdaDot];...
         end 
-        if ~isreal(Xdot)||any(isnan(Xdot))
-            stop = true;
-        end
     else % For constructing the solution structure. 
         % Return the switch functions, constraints, throttles, anything else you want to log.
         Xdot.throttles = delta;
@@ -250,6 +244,7 @@ end
         Xdot.totalTorqueInertialFrame = totalTorque+optimalControlTorque;
         Xdot.totalThrustTranslationalFrame = totalThrustLVLH;
         Xdot.Hamiltonian = H;
+        Xdot.constraint = constraintFunc;
     end
      
 end 

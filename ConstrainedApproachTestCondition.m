@@ -131,7 +131,9 @@ switch caseNum
         [problemParameters, solverParameters] = ConstrainedApproachTestCondition(caseNum/10,engineType);
         problemParameters.dynamics.type = 'LinearNoMass';        
         problemParameters.x0 = problemParameters.x0(1:6); 
-    case {1011,1012,1013,1014} % 6dof problems with similar conditions to the transfers in the JSR paper 
+    
+    % 6dof problems with similar conditions to the transfers in the JSR paper 
+    case {1011,1012,1013,1014} 
         [problemParameters, solverParameters] = ConstrainedApproachTestCondition(caseNum-1000,engineType,thrusterConfig);
         transferTime = 48;
         solverParameters.tSpan = [0, transferTime];
@@ -142,7 +144,7 @@ switch caseNum
         problemParameters.dynamics.maxThrust = repmat(problemParameters.dynamics.maxThrust,numEngines,1);
         problemParameters.dynamics.engineLocationBody = locations/1e3;
         problemParameters.dynamics.thrustDirectionBody = thrustDirection;
-        problemParameters.dynamics.inertia = diag([36,37,38]); % kg.km^2
+        problemParameters.dynamics.inertia = diag([36,37,38]); % kg.m^2
         problemParameters.dynamics.inertiaInverse = inv(problemParameters.dynamics.inertia);
         problemParameters.dynamics.initialMass = problemParameters.initialMass;
         problemParameters.constraint.epsilon = 0.5;
@@ -157,6 +159,7 @@ switch caseNum
         problemParameters.pf = [0;0;0];
         problemParameters.w0 = [0;0;0];
         problemParameters.wf = [0;0;0];
+        
     case {1100,1101} % Attitude rotations only
         [problemParameters, solverParameters] = ConstrainedApproachTestCondition(1011,engineType,thrusterConfig);
         problemParameters.xf(1:6) = problemParameters.x0(1:6);

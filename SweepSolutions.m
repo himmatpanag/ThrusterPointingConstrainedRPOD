@@ -27,6 +27,13 @@ elseif contains(type,'epsilon')
     if dynamicStepSize
         dynamicRhoSpeedUp = true;
     end
+elseif contains(type,'kappa')
+    rate = 0.95;    
+    finalKappa = values(1);
+    N = ceil(log(finalKappa/problemParameters.dynamics.torqueCostMultiplier)/log(rate));
+    if dynamicStepSize
+        dynamicRhoSpeedUp = true;
+    end
 else 
     N = numel(values);
 end
@@ -81,7 +88,7 @@ while ii < N+1
             fprintf('prevValue %f\t stepSize\t%f newValue%f\t',prevValue*180/pi,stepSize*180/pi,(prevValue+stepSize)*180/pi);
         case 'Radius'
             if prevStepPass, prevValue = problemParameters.constraint.targetRadius; end             
-            targetValue = values(ii);            
+            targetValue = values(ii);             
             stepSize = (targetValue-prevValue)/(numFails+1);
             problemParameters = UpdateSphereCircleRadius(problemParameters,prevValue + stepSize);            
             fprintf('prevValue %f\t stepSize\t%f newValue%f\t',prevValue*1e3,stepSize*1e3,(prevValue+stepSize)*1e3);
@@ -131,6 +138,18 @@ while ii < N+1
             if prevStepPass && (prevValue < finalRho) && (prevValueEps < finalEps)
                 break
             end
+        case 'kappa'
+            if prevStepPass, prevValue = problemParameters.dynamics.torqueCostMultiplier; end    
+            targetValue = prevValue*rate;
+            stepSize = (targetValue-prevValue)/(numFails+1);
+            if (prevValue >= finalKappa) % only update parameters if target has not been reached
+                problemParameters.dynamics.torqueCostMultiplier = prevValue + stepSize;
+            end
+
+            if prevStepPass && (prevValue < finalKappa)
+                break
+            end
+            fprintf('prevValue %f\t stepSize\t%f newValue%f\t',prevValue,stepSize,(prevValue+stepSize));
         case 'rhokappa'
             if prevStepPass, prevValue = solverParameters.rho; prevValueKappa = problemParameters.dynamics.torqueCostMultiplier; end    
             if numel(values) > 1, finalKappa = values(2); else, finalKappa = finalRho; end
@@ -149,7 +168,33 @@ while ii < N+1
             if prevStepPass && (prevValue < finalRho) && (prevValueKappa < finalKappa)
                 break
             end
+        case 'rhoepsilonkappa'
+            if prevStepPass
+                prevValue = solverParameters.rho; 
+                prevValueKappa = problemParameters.dynamics.torqueCostMultiplier; 
+                prevValueEps = problemParameters.constraint.epsilon; 
+            end    
+            if numel(values) > 1, finalKappa = values(2); finalEps = values(3); else, finalKappa = finalRho; finalEps = finalRho; end
+            targetValue = prevValue*rate;
+            stepSize = (targetValue-prevValue)/(numFails+1);
 
+            targetValueKappa = prevValueKappa*rate;
+            stepSizeKappa = (targetValueKappa-prevValueKappa)/(numFails+1);
+            targetValueEps = prevValueEps*rate;
+            stepSizeEps = (targetValueEps-prevValueEps)/(numFails+1);
+            if (prevValueEps >= finalEps) % only update parameters if target has not been reached
+                problemParameters.constraint.epsilon = prevValueEps + stepSizeEps;
+            end
+            if (prevValueKappa >= finalKappa) % only update parameters if target has not been reached
+                problemParameters.dynamics.torqueCostMultiplier = prevValueKappa + stepSizeKappa;
+            end
+            if (prevValue >= finalRho) 
+                solverParameters.rho = prevValue + stepSize; 
+            end
+
+            if prevStepPass && (prevValue < finalRho) && (prevValueKappa < finalKappa) && (prevValueEps < finalEps)
+                break
+            end
 
         case 'ThrusterConfig' % quick and dirty implementation of thrust value 
             if prevStepPass, prevValue = problemParameters.dynamics.maxThrust(end); end             
@@ -186,7 +231,7 @@ while ii < N+1
         else
             solveFunc = @Solve6DOFPointingConstrainedControlProblem;
         end
-        if solverParameters.rho < .01
+        if (solverParameters.rho < .2) || (strcmp(type,'Radius')) || (strcmp(type,'kappa'))
             solverParameters.fSolveOptions.MaxIterations = 30;
         else
             solverParameters.fSolveOptions.MaxIterations = 300;
@@ -209,23 +254,32 @@ while ii < N+1
             guess2 = newSols(iter).newCostateGuess + (newSols(iter).newCostateGuess-newSols(iter-1).newCostateGuess)*norm(stepSize)/norm(prevPassedStepSize);
             solverParameters.initialCostateGuess = guess2;
             sol2 = solveFunc(problemParameters,solverParameters,true);
-            if norm(sol1.finalStateError) < norm(sol2.finalStateError)
+            if nosrm(sol1.finalStateError) < norm(sol2.finalStateError)
                 solverParameters.initialCostateGuess = guess1;
             end
         end
     end 
 
-    solution = solveFunc(problemParameters,solverParameters);
+    solution = solveFunc(problemParameters,solverParameters); 
 
     debug = false; 
     if debug % Put a breakpoint in here to plot latest solutions
         sol = newSols(end-1);
         PlotSolution.ConvergedCostateTrace(newSols(1:(end-1)))
         PlotSolution.RotationalSummary(sol); PlotSolution.ThrustProfileAllEngines(sol)
+        PlotSolution.SixDOF_Traj(sol)
+        PlotSolution.PlotOrientationChaserRelativeToTranslationalFrame(sol.x(end,8:10)',sol.x(end,1:3)'*1e3,sol.t(end),sol.problemParameters,gca)
+
     end
 
     if isfield(solution,'finalStateError')
-        solPass = (norm(solution.finalStateError)<1e-8)|| ( ~any(~solution.solutionFound));
+        costateDelta = solution.newCostateGuess-newSols(iter).newCostateGuess;
+        [maxVal,maxIdx] = max(abs(costateDelta));
+        maxPctChange = maxVal./abs(newSols(iter).newCostateGuess(maxIdx))* 100;
+        costateDeltaNorm = norm(costateDelta);
+        solPass = (norm(solution.finalStateError)<1e-7) || ...
+            ((norm(solution.finalStateError)<1e-5) && ( ~any(~solution.solutionFound)));% || ...
+            %((norm(solution.finalStateError)<1e-4) && (costateDeltaNorm < 1e-2) && maxPctChange < 0.05);
     else
         solPass = ~any(~solution.solutionFound);
     end

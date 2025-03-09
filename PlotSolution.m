@@ -510,7 +510,7 @@ methods(Static)
     end 
     
     %% Functions specifically for 6DOF 
-    function PlotOrientationChaserRelativeToTranslationalFrame(p,pos,t,problemParameters,ax)
+    function [p,s] = PlotOrientationChaserRelativeToTranslationalFrame(p,pos,t,problemParameters,ax)
         % Plotting the orientation of the chaser in the translational frame is misleading, since the target may be rotating with some angular velocity relative to thte inertial frame and it is not clear what this rate is. 
         % If we asssume the target is not rotating relative to the inertial frame, then by the end of the trajectory, it will have a slightly different orientation (w.r.t.) to the translational frame. 
         DCM_BodyToInertial = mrp2DCM(p);
@@ -519,8 +519,9 @@ methods(Static)
 
         % Plot a cube of length 2 centred at pos and oriented according to DCM_BodyToLVLH
         % Define the vertices of the cube
-        cubeLength = 2;
+        cubeLength = 2*max(max(abs(problemParameters.dynamics.engineLocationBody)))*1e3;
         vertices = cubeLength/2*[1,1,1;1,1,-1;1,-1,1;1,-1,-1;-1,1,1;-1,1,-1;-1,-1,1;-1,-1,-1];
+        
          % Rotate the vertices
         vertices = (DCM_BodyToLVLH*vertices')';
         % Translate the vertices
@@ -530,7 +531,7 @@ methods(Static)
         % Plot the cube
         axes(ax);
         hold on;
-        patch('Vertices',vertices,'Faces',faces,'FaceColor','none','EdgeColor','k','LineWidth',1.5,'DisplayName','Chaser');
+        patch('Vertices',vertices,'Faces',faces,'FaceColor','k','FaceAlpha',0.05,'EdgeColor','k','LineWidth',1.5,'DisplayName','Chaser');
         % Plot the engine plume directions as small cones and label/colour them
         numEngines = problemParameters.dynamics.numEngines; 
         C = linspecer(numEngines);
@@ -542,15 +543,16 @@ methods(Static)
             else 
                 coneAng = pi/7;
             end 
-            s = PlotSolution.PlotCone(ax,coneAng,C(ii,:),cubeLength/5,plumeDir,posEngine);
-            s.DisplayName = ['Engine ',num2str(ii)];
+            s(ii) = PlotSolution.PlotCone(ax,coneAng,C(ii,:),cubeLength/5,plumeDir,posEngine);
+            s(ii).DisplayName = ['Engine ',num2str(ii)];
+            %plot3(posEngine(1),posEngine(2),posEngine(3),'.','Color',C(ii,:),'HandleVisibility','off','MarkerSize',15);
             % sz = size(s.XData);
             % row = dataTipTextRow('Engine ',repelem(num2str(ii),20,1)  );
             % s.DataTipTemplate.DataTipRows(end+1) = row;
             % datatip(s,s.XData(1),s.YData(2),23)
         end
         legend('show',"Location","best")
-        axis equal; xlabel('x'); ylabel('y'); zlabel('z')
+        axis equal; xlabel('x (m)'); ylabel('y (m)'); zlabel('z (m)')
         ax.View = [32 30];
     end
 
@@ -875,6 +877,80 @@ methods(Static)
         legend('show','Location','best');
         xlabel('Time'); title('Cost of control torque vs thrust');
         warning('Not suitable for RCS thrusters yet!'); % Need to separate the RW torque cost from the thruster torques
+    end
+
+    function hf2 = SixDOF_Traj_Animated(solution)
+        % Create figure
+        hf2=figure('Name','6DOF Trajectory'); ax = gca; grid on; hold on;
+        
+        % Plot fixed elements
+        plot3(0,0,0,'m.','MarkerSize',80,'DisplayName','Target Location')
+        x = [solution.problemParameters.x0(1:6)';solution.problemParameters.xf']*1e3;
+        plot3(x(1,1), x(1,2), x(1,3),'bo','MarkerSize',10,'DisplayName','x_0 Chaser Initial')
+        plot3(x(end,1), x(end,2), x(end,3),'ko','MarkerSize',10,'DisplayName','x_f Chaser Final')
+        plot3(solution.x(:,1)*1e3,solution.x(:,2)*1e3,solution.x(:,3)*1e3,'DisplayName','OptimalTraj')
+
+        if solution.problemParameters.constraint.type == POINTING_CONSTRAINT_TYPE.ORIGIN_VARIABLE_ANGLE
+            PlotSphereConstraint(gca,2,[0;0;0]);
+        end
+
+        PlotSolution.InitialOrientation(solution,gca); 
+
+        % Initialize variables
+        %Set video parameters
+        video_time = 5; %seconds
+        video_fps = 20; %fps
+  
+        numFrames = video_time * video_fps; 
+        frames(numFrames) = struct('cdata', [], 'colormap', []);
+
+        %Fixed time steps
+        steps = 0:(solution.t(end)/numFrames):solution.t(end); %steps vector
+    
+        % Animate the cube along the trajectory
+        for i = 1:numFrames
+
+            %Get index corresponding to frame
+            vect_diff = abs(solution.t-steps(i)); 
+            vect_min = min(vect_diff);
+            index = find(vect_diff==vect_min);
+
+            %Get position and orientation for time step closer
+            pos_steps = solution.x(index,1:3)' * 1e3; 
+            p_steps = solution.x(index, 8:10)'; % Orientation (MRPs)
+            t_steps = solution.t(index); % Time
+    
+            % Clear the previous cube
+            for nn=1:(solution.problemParameters.dynamics.numEngines+1)
+                delete(ax.Children(1));
+            end
+    
+            % Re-plot trajectory and cube
+            %plot3(0, 0, 0, 'm.', 'MarkerSize', 80, 'DisplayName', 'Target Location');
+            %plot3(solution.x(:, 1) * 1e3, solution.x(:, 2) * 1e3, solution.x(:, 3) * 1e3, 'DisplayName', 'OptimalTraj');
+            
+
+
+            %PlotSolution.PlotOrientationChaserRelativeToTranslationalFrame(p_steps, pos_steps, t_steps, solution.problemParameters, gca,solution.throttle(:,index));
+            PlotSolution.PlotOrientationChaserRelativeToTranslationalFrame(p_steps, pos_steps, t_steps, solution.problemParameters, gca);
+
+            % Capture frame
+            frames(i) = getframe(hf2);
+            
+        end
+    
+        % Play the animation
+        hf2.Visible = 'on';
+        movie(hf2, frames, 1, 20); % Play the movie
+
+        % Save the animation as a video file
+        videoWriter = VideoWriter('ChaserTrajectoryAnimation', 'MPEG-4');
+        videoWriter.FrameRate = video_fps; % Set the frame rate
+        open(videoWriter);
+        writeVideo(videoWriter, frames);
+        close(videoWriter);
+        
+        disp('Video saved as ChaserTrajectoryAnimation.mp4');
     end
 end 
 end 

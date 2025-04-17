@@ -9,7 +9,7 @@ function s = PlotSphereConstraint(ax,radius,origin)
     Z = radius.*sin(p) + origin(3); 
     X = radius.*cos(p).*cos(t)+ origin(1);
     Y = radius.*cos(p).*sin(t)+ origin(2);
-    s = surf(X,Y,Z,'FaceColor',[0,153,255]./255,'FaceAlpha',0.3,'DisplayName',['Sphere R=',num2str(radius)]);
+    s = surf(X,Y,Z,'FaceColor',[0,153,255]./255,'FaceAlpha',0.3,'DisplayName',['Constraint Sphere R=',num2str(radius)]);
     set(s,'FaceAlpha',0.3);
     set(s,'LineStyle','--');
     set(s,'EdgeAlpha',0.3);

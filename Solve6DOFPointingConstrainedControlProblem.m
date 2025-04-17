@@ -135,10 +135,11 @@ end
     etaPrime= zeros(dynamics.numEngines,1);
     % Compute the constraint function, eta and etaPrime
     if constraint.type ~= POINTING_CONSTRAINT_TYPE.NONE
+        R = constraint.targetRadius;
         for ii = 1:dynamics.numEngines
             d = dynamics.engineLocationBody(:,ii);
             u = dynamics.thrustDirectionBody(:,ii);
-            R = constraint.targetRadius;
+            
             rB = Phi'*pos+d;
             if rB'*u >= 0
                 constraintFunc(ii) = 1/R^2*(pos'*pos + 2*pos'*Phi*d+d'*d-R^2 - (rB'*u)^2);
@@ -150,6 +151,8 @@ end
             etaPrime(ii) = 1/(2*constraint.epsilon)*(1-(tanh(constraintFunc(ii)/constraint.epsilon))^2);
             % If the constraint function is positive, the constraint should be INACTIVE and eta = 1 
         end 
+    else
+        R=0;
     end
 
     % Compute the switch functions and throttles
@@ -161,7 +164,8 @@ end
         % Compute the switch functions and controls
         SwitchFunctions(ii) = (-1 + eta(ii) * (lambda_m - dynamics.exhaustVelocity/m * lambda_v'*Phi*dynamics.thrustDirectionBody(:,ii) + ...
             - dynamics.exhaustVelocity*D_Temp*r_cross_v));
-        delta(ii) = 1/2 * (1+tanh(SwitchFunctions(ii)/rho));
+        %delta(ii) = 1/2 * (1+tanh(SwitchFunctions(ii)/rho));
+        delta(ii) = 1/2 * (1+(SwitchFunctions(ii))/(sqrt(SwitchFunctions(ii)^2 + rho^2)));
 
         mDot = mDot - dynamics.maxThrust(ii)/dynamics.exhaustVelocity*delta(ii)*eta(ii);
         H = H + dynamics.maxThrust(ii)/dynamics.exhaustVelocity*delta(ii);
@@ -172,12 +176,12 @@ end
     optimalControlTorque = [0;0;0];
     switch dynamics.attitudeActuator
         case ATTITUDE_CONTROL_TYPE.CONTROL_TORQUE
-            optimalControlTorque = (-dynamics.inertiaInverse'*lambda_w)./dynamics.torqueCostMultiplier;
-            %S = -dynamics.inertiaInverse'*lambda_w;
-            %optimalControlTorque = S./sqrt(S.^2 + rho^2) .* dynamics.maxControlTorque;
-            % for ii = 1:3
-            %     optimalControlTorque(ii) = max(min(optimalControlTorque(ii),dynamics.maxControlTorque),-dynamics.maxControlTorque);
-            % end
+            S = -dynamics.inertiaInverse'*lambda_w;
+            optimalControlTorque = S./sqrt(S.^2 + (dynamics.torqueCostMultiplier)^2) .* dynamics.maxControlTorque;
+            %optimalControlTorque = (-dynamics.inertiaInverse'*lambda_w)./dynamics.torqueCostMultiplier;
+            %for ii = 1:3
+            %    optimalControlTorque(ii) = max(min(optimalControlTorque(ii),dynamics.maxControlTorque),-dynamics.maxControlTorque);
+            %end
     end
 
     % Compute the state and costate dynamics
@@ -192,7 +196,14 @@ end
     B_Temp = 0.25 * ((1 + p2) .* eye(3) + 2 * (pCross*pCross + pCross));
     pDot = B_Temp * w; % Testing pdot %pDot2 = .5 * (.5*(1-p2)*eye(3) + pCross + p*p')*w
     omegaDot = dynamics.inertiaInverse*(totalTorque+  optimalControlTorque - cross(w,dynamics.inertia*w));
-    [lambdaDot, E_p, E_r, E_t] = CostateDerivativesSymbolic6DOF(t,X,dynamics,delta,Phi,eta,etaPrime,constraint);
+    %[lambdaDot, E_p, E_r, E_t] = CostateDerivativesSymbolic6DOF(t,X,dynamics,delta,Phi,eta,etaPrime,constraint);
+    [lambdaDot, E_p, E_r, E_t] = CostateDerivativesSymbolic6DOF(t,X,...
+        dynamics.inertia,dynamics.inertiaInverse,dynamics.frameRotationRate,...
+        dynamics.exhaustVelocity,...
+        dynamics.numEngines, dynamics.engineLocationBody,...
+        dynamics.thrustDirectionBody,dynamics.maxThrust ,delta,Phi,eta,etaPrime,...
+        constraint.type,R);
+
     H = H + X(14:16)'*rDot + lambda_v'*vDot + ...
         lambda_m*mDot + X(21:23)'*pDot + lambda_w'*omegaDot;
     if returnDynamics
@@ -292,8 +303,13 @@ function trajOut = costFunction(lam0_guess,tspan, x0, xf, p0, pf, ...
             TSPAN = [tOut(end),tspan(end)];
             X0 = XOut(end,:); 
             normFinalMRP = norm(X0(8:10));
-            if normFinalMRP > .2
+            if normFinalMRP > 1.09 % To avoid chattering 
+                pOld =X0(8:10)';
                 X0(8:10) = -X0(8:10)./(normFinalMRP^2); % Switch from shadow set to main set 
+                %newLam = (2*pOld*pOld'-pOld'*pOld*eye(3))*X0(21:23)'; % Costate switch shadow set.
+                %X0(21:23) = newLam';
+                X0(21:23) = X0(21:23)*(2*(pOld*pOld')-(pOld'*pOld)*eye(3))'; % Costate switch shadow set.
+                
             end 
             ii=ii+1;
         end
@@ -365,7 +381,7 @@ function [value,isterminal,direction] = FinalTimeReachedEvent(t,X,dynamics,rho,c
 end
 
 function [value,isterminal,direction] = MRP_InShadowSet(~,X,dynamics,rho,constraint)
-    value = norm(X(8:10))-1-0.5; % norm goes over 1.5
+    value = norm(X(8:10))-1-0.1; % norm goes over 1.1
     isterminal = 1;
     direction = 1;
 end

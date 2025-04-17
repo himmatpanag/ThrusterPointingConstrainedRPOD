@@ -9,8 +9,8 @@ end
 
 cd(dir);
 for ii = 1:numel(hf)
-    saveas(hf,hf(ii).Name,'fig');
-    exportgraphics(h,[h.Name,'.png'],'Resolution',400);
+    saveas(hf(ii),hf(ii).Name,'fig');
+    exportgraphics(hf(ii),[hf(ii).Name,'.png'],'Resolution',400);
     %saveas(hf,hf(ii).Name,'png');
     
 end 

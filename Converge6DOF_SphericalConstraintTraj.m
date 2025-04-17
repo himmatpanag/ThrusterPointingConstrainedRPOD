@@ -1,13 +1,16 @@
-function TestSymbolicImplementation()
+function Converge6DOF_SphericalConstraintTraj()
     engineType = 3; % MONOPROPELLANT
+    engineType = 2; % BIPROPELLANT
     % engineType = 4; % COLD GAS
     [problemParameters, solverParameters] = ConstrainedApproachTestCondition(1011,engineType,THRUSTER_CONFIGURATION.CG_ALIGNED_6);
     for ii = 1:6, problemParameters.dynamics.maxThrust(ii)=.004; end
-    solutionCG_AlignedUnconstrained.solutionFound = false; 
     solverParameters.initialCostateGuess = [-0.152390378730075   2.390582055890830   0.000000000000007  -6.799259141355201  57.203929337461183   0.000000000000211   0.000143446214180  -0.000008931051000  -0.000001093674000   0.000003524540000  -0.000071361039000  -0.000010314917000   0.000008709836000]';
     solutionCG_AlignedUnconstrained = Solve6DOFPointingConstrainedControlProblem(problemParameters,solverParameters);
-   
-    PlotSummary(solutionCG_AlignedUnconstrained);
+    
+    solutionCG_AlignedUnconstrainedrhoSweep = SweepSolutions(solutionCG_AlignedUnconstrained, ...
+        'rho',1e-3);
+    PlotSolution.ThrustProfileAllEngines(solutionCG_AlignedUnconstrainedrhoSweep(end));
+
     %% Test rotation only
     [problemParameters, solverParameters] = ConstrainedApproachTestCondition(2100,engineType,THRUSTER_CONFIGURATION.RCS_12);
     solutionAttitudeOnly = OLD_Solve6DOFPointingConstrainedControlProblem(problemParameters,solverParameters);
@@ -21,7 +24,7 @@ function TestSymbolicImplementation()
     problemParametersCG_6_Constrained.constraint.epsilon = .15;
     solverParametersCG_6_Constrained.rho = .3;
     solverParametersCG_6_Constrained.fSolveOptions.MaxIterations = 200;
-    for ii = 1:6, problemParametersCG_6_Constrained.dynamics.maxThrust(ii)=.004; end
+    for ii = 1:6, problemParametersCG_6_Constrained.dynamics.maxThrust(ii)=.003; end
     
     solutionCG_Aligned_Constrained = Solve6DOFPointingConstrainedControlProblem(problemParametersCG_6_Constrained,solverParametersCG_6_Constrained);
     PlotSolution.ThrustProfileAllEngines(solutionCG_Aligned_Constrained);
@@ -30,18 +33,62 @@ function TestSymbolicImplementation()
     PlotSolution.PlumeAngleSixDOF(solutionCG_Aligned_Constrained);
 
     solutionCG_Aligned_ConstrainedRadius_Sweep = SweepSolutions(solutionCG_Aligned_Constrained, ...
-        'Radius',[.1:.02:2]./1000,true);
-    
+        'Radius',[.1:.02:3.4]./1000,true);
+
+    PlotSolution.Sweep6DOF(solutionCG_Aligned_ConstrainedRadius_Sweep)
     PlotSolution.ThrustProfileAllEngines(solutionCG_Aligned_ConstrainedRadius_Sweep(end));
     PlotSolution.ConvergedCostateTrace(solutionCG_Aligned_ConstrainedRadius_Sweep)
 
+    %radii = [.5,1,1.5,2,2.5,3,3.4];
+    idxsToSweep = [23,49,74,99,124,149,169];
     solutionCG_Aligned_Constrained2_rhoSweep = SweepSolutions(solutionCG_Aligned_ConstrainedRadius_Sweep(end), ...
         'rho',1e-3,true);
 
+
+    solutionCG_Aligned_ConstrainedR05_rhoSweep = SweepSolutions(solutionCG_Aligned_ConstrainedRadius_Sweep(23), ...
+        'rho',1e-3,true);
+    solutionCG_Aligned_ConstrainedR05_VerySmallrhoSweep = SweepSolutions(solutionCG_Aligned_ConstrainedR05_rhoSweep(end), ...
+        'rho',1e-4,true); % This does the trick!     
+    NowSweepEps= SweepSolutions(solutionCG_Aligned_ConstrainedR05_rhoSweep(end), ...
+        'epsilon',1e-2,true); % Got to 30 iterations and eps =.0878
+    
+    solutionCG_Aligned_ConstrainedR1_epsSweep = SweepSolutions(solutionCG_Aligned_ConstrainedRadius_Sweep(49), ...
+        'epsilon',1e-2,true);
+    solutionCG_Aligned_ConstrainedR1_rhoSweep = SweepSolutions(solutionCG_Aligned_ConstrainedR1_epsSweep(4), ...
+        'rho',1e-3,true); 
+
+    solutionCG_Aligned_ConstrainedR15_epsSweep = SweepSolutions(solutionCG_Aligned_ConstrainedRadius_Sweep(74), ...
+        'epsilon',1e-2,true);
+    solutionCG_Aligned_ConstrainedR15_Se_Sr = SweepSolutions(solutionCG_Aligned_ConstrainedR15_epsSweep(end), ...
+        'rho',1e-2,true);
+
+    solutionCG_Aligned_ConstrainedR25_epsSweep = SweepSolutions(solutionCG_Aligned_ConstrainedRadius_Sweep(124), ...
+        'epsilon',1e-2,true);
+    solutionCG_Aligned_ConstrainedR25_Se_Sr = SweepSolutions(solutionCG_Aligned_ConstrainedRadius_Sweep(123), ...
+        'rho',1e-2,true);
+    solutionCG_Aligned_ConstrainedR25_epsSweep = SweepSolutions(solutionCG_Aligned_ConstrainedR25_Se_Sr(32), ...
+        'epsilon',1e-2,true); 
+    solutionCG_Aligned_ConstrainedR25_VE_Sr = SweepSolutions(solutionCG_Aligned_ConstrainedR25_epsSweep(9), ...
+        'epsilon',1e-3,true); 
+
+    solutionCG_Aligned_ConstrainedR3_epsSweep = SweepSolutions(solutionCG_Aligned_ConstrainedRadius_Sweep(149), ...
+        'epsilon',.1,true);
+    solutionCG_Aligned_ConstrainedR3_Se_Sr = SweepSolutions(solutionCG_Aligned_ConstrainedR3_epsSweep(end), ...
+        'rho',1e-2,true);
+    solutionCG_Aligned_ConstrainedR3 = SweepSolutions(solutionCG_Aligned_ConstrainedR3_Se_Sr(end), ...
+        'epsilon',1e-3,true);
+
+    solutionCG_Aligned_ConstrainedR34_epsSweep = SweepSolutions(solutionCG_Aligned_ConstrainedRadius_Sweep(169), ...
+        'epsilon',1e-2,true);
+    solutionCG_Aligned_ConstrainedR34_Se_Sr = SweepSolutions(solutionCG_Aligned_ConstrainedR34_epsSweep(1), ...
+        'rho',3e-2,true);    
+    solutionCG_Aligned_ConstrainedR34 = SweepSolutions(solutionCG_Aligned_ConstrainedR34_Se_Sr(end), ...
+        'epsilon',1e-3,true);
+    
     PlotSolution.ThrustProfileAllEngines(solutionCG_Aligned_Constrained2_rhoSweep(end));
     PlotSolution.ConvergedCostateTrace(solutionCG_Aligned_Constrained2_rhoSweep)
 
-    solutionCG_Aligned_ConstrainedEps_Sweep = SweepSolutions(solutionCG_Aligned_Constrained2_rhoSweep(1), ...
+    solutionCG_Aligned_ConstrainedEps_Sweep = SweepSolutions(solutionCG_Aligned_ConstrainedRadius_Sweep(end), ...
         'epsilon',1e-3);
 
     PlotSolution.ThrustProfileAllEngines(solutionCG_Aligned_ConstrainedEps_Sweep(end));
@@ -124,102 +171,235 @@ sol =rhoKappaSweepCG6_Torque_FreeMRP(end); PlotSolution.ThrustProfileAllEngines(
 % for longer transfers where the frame rotates more. 
 
 %% 6x CG aligned with and 2m spherical constraint AND control torque
-[problemParametersCG_6_ConstraintTorque, solverParametersCG_6_ConstraintTorque] = ConstrainedApproachTestCondition(2013,engineType,THRUSTER_CONFIGURATION.CG_ALIGNED_6);
-solverParametersCG_6_ConstraintTorque.initialCostateGuess = solutionCG_AlignedUnconstrained.newCostateGuess;
+[problemParametersCG_6_ConstraintTorque, solverParametersCG_6_ConstraintTorque] = ConstrainedApproachTestCondition(2013,3,THRUSTER_CONFIGURATION.CG_ALIGNED_6);
+solverParametersCG_6_ConstraintTorque.initialCostateGuess = [-0.4515    2.3920   -0.0000   -9.8852   57.1118   -0.0000    0.0001   -0.0000   -0.0000    0.0125    0.0000   -0.0000    0.0285]';
 problemParametersCG_6_ConstraintTorque = UpdateSphereCircleRadius(problemParametersCG_6_ConstraintTorque,.1/1000);
 problemParametersCG_6_ConstraintTorque.constraint.epsilon = .1;
+solverParametersCG_6_ConstraintTorque.fSolveOptions.MaxIterations=300;
 solutionCG_Aligned_ConstrainedControlTorque = Solve6DOFPointingConstrainedControlProblem(problemParametersCG_6_ConstraintTorque,solverParametersCG_6_ConstraintTorque);
-sweepCG_Aligned_ConstrainedControlTorque_Mr= SweepSolutions(solutionCG_Aligned_ConstrainedControlTorque, ...
+thrustSweep = SweepSolutions(solutionCG_Aligned_ConstrainedControlTorque,...
+    'Thrust',0.002:0.0005:0.003,true);
+c1 = thrustSweep(end).problemParameters.dynamics.exhaustVelocity;
+c2 =problemParameters.dynamics.exhaustVelocity;
+exhaustVelSweep= SweepSolutions(thrustSweep(end),...
+    'ExhaustVelocity',linspace(c1,c2,2),true);
+
+sweepCG_Aligned_ConstrainedControlTorque_Mr= SweepSolutions(exhaustVelSweep(end), ...
     'rho',0.2,true);
-PlotSolution.ThrustProfileAllEngines(sweepCG_Aligned_ConstrainedControlTorque_Mr(end))
+PlotSolution.ConvergedCostateTrace(sweepCG_Aligned_ConstrainedControlTorque_Mr);
+PlotSolution.Sweep6DOF(sweepCG_Aligned_ConstrainedControlTorque_Mr);
+PlotSolution.ThrustProfileAllEngines(sweepCG_Aligned_ConstrainedControlTorque_Mr(end));
 
-solutionCG_Aligned_ConstrainedControlTorqueR2 = SweepSolutions(sweepCG_Aligned_ConstrainedControlTorque_Mr(end),'Radius', ...
-    [0.1:.025:2]./1000,true);
+solCG6_Torque_RadSweep3= SweepSolutions(sweepCG_Aligned_ConstrainedControlTorque_Mr(end),'Radius', ...
+    [0.1:.025:3]./1000,true);
+solCG6_Torque_RadSweep38= SweepSolutions(solCG6_Torque_RadSweep3(end),'Radius', ...
+    [3:.025:3.8]./1000,true);
+solCG6_Torque_RadSweep385= SweepSolutions(solCG6_Torque_RadSweep38(end),'Radius', ...
+    [3.8:.025:3.85]./1000,true);
+solCG6_Torque_RadSweep39= SweepSolutions(solCG6_Torque_RadSweep385(end),'kappa', ...
+    0.3,true);
+solCG6_Torque_RadSweep39_LowK= SweepSolutions(solCG6_Torque_RadSweep39(end),'Radius', ...
+    [3.85:.01:3.9]./1000,true);
 
-PlotSolution.ThrustProfileAllEngines(solutionCG_Aligned_ConstrainedControlTorqueR2(end));
-PlotSolution.ConvergedCostateTrace(solutionCG_Aligned_ConstrainedControlTorqueR2);
-PlotSolution.RotationalSummary(solutionCG_Aligned_ConstrainedControlTorqueR2(end));
-solutionCG_Constraint2Torque_Sr_Se = SweepSolutions(solutionCG_Aligned_ConstrainedControlTorqueR2(end), ...
+PlotSolution.ThrustProfileAllEngines(solCG6_Torque_RadSweep39_LowK(end));
+PlotSolution.ConvergedCostateTrace(solCG6_Torque_RadSweep3);
+PlotSolution.Sweep6DOF(solCG6_Torque_RadSweep39_LowK,'Radius');
+
+solCG6_R3_TorqueKappa= SweepSolutions(solCG6_Torque_RadSweep3(end), ...
     'kappa',1e-3,true);
 
-PlotSolution.ThrustProfileAllEngines(solutionCG_Constraint2Torque_Sr_Se(end));
-PlotSolution.ConvergedCostateTrace(solutionCG_Constraint2Torque_Sr_Se);
-PlotSolution.RotationalSummary(solutionCG_Constraint2Torque_Sr_Se(end));
-PlotSolution.CostBreakdown(solutionCG_Constraint2Torque_Sr_Se(end));
-PlotSolution.CostBreakdown(solutionCG_Constraint2Torque_Sr_Se(1));
-% Save 33g of fuel by allowing for rotations! Awesome result (unconverged
-% rho).
-% Chaser gets to final pos/vel earlier (at 42 seconds) and then reorients
-% so that final MRP is zero. This only costs 2-3g mroe fuel than when the
-% final MRP is free
+solCG6_R3_TorqueRho= SweepSolutions(solCG6_R3_TorqueKappa(end), ...
+    'rho',1e-2,true);
 
-solutionCG_Constraint2ExpensiveTorque_Sr_Se = SweepSolutions(solutionCG_Constraint2Torque_Sr_Se(1), ...
-    'rho',1e-3,true);
-solutionCG_Constraint2CheaperTorque_Sr_Se = SweepSolutions(solutionCG_Constraint2Torque_Sr_Se(end), ...
-    'rho',1e-3,true);
-PlotSolution.ConvergedCostateTrace(solutionCG_Constraint2ExpensiveTorque_Sr_Se);
-PlotSolution.ConvergedCostateTrace(solutionCG_Constraint2CheaperTorque_Sr_Se);
+solCG6_R2_TorqueKappa= SweepSolutions(solCG6_Torque_RadSweep3(79), ...
+    'kappa',1e-3,true);
+solCG6_R2_TorqueRho= SweepSolutions(solCG6_R2_TorqueKappa(end), ...
+    'rho',1e-2,true);
 
-for sol = [solutionCG_Constraint2ExpensiveTorque_Sr_Se(end), solutionCG_Constraint2CheaperTorque_Sr_Se(end)]
-    PlotSolution.ThrustProfileAllEngines(sol);
-    PlotSolution.RotationalSummary(sol);
-    PlotSolution.CostBreakdown(sol);
+solCG6_R225_TorqueKappa= SweepSolutions(solCG6_Torque_RadSweep3(89), ...
+    'kappa',1e-3,true);
+solCG6_R225_TorqueRho= SweepSolutions(solCG6_R225_TorqueKappa(end), ...
+    'rho',1e-2,true);
+
+solCG6_R25_TorqueKappa= SweepSolutions(solCG6_Torque_RadSweep3(99), ...
+    'kappa',1e-3,true);
+solCG6_R25_TorqueRho= SweepSolutions(solCG6_R25_TorqueKappa(end), ...
+    'rho',1e-2,true);
+
+solCG6_R3_TorqueLowKappa= SweepSolutions(solCG6_R3_TorqueKappa(end), ...
+    'kappa',1e-4,true);
+allKappas =  [solCG6_R3_TorqueKappa, solCG6_R3_TorqueLowKappa];
+PlotSolution.Sweep6DOF(allKappas);
+PlotSolution.ConvergedCostateTrace(solCG6_R3_TorqueLowKappa);
+
+kappaLowRadiusSweep = SweepSolutions(solCG6_R3_TorqueKappa(end),'Radius',(3:-0.05:1)/1e3, true);
+
+solCG6_R1_TorqueRho= SweepSolutions(kappaLowRadiusSweep(end), ...
+    'rho',1e-2,true); PlotSolution.Sweep6DOF(solCG6_R1_TorqueRho);
+solCG6_R15_TorqueRho= SweepSolutions(kappaLowRadiusSweep(33), ...
+    'rho',1e-2,true);
+solCG6_R2_TorqueRho= SweepSolutions(kappaLowRadiusSweep(22), ...
+    'rho',1e-2,true);
+solCG6_R25_TorqueRho= SweepSolutions(kappaLowRadiusSweep(12), ...
+    'rho',1e-2,true);
+solCG6_R3_TorqueRho= SweepSolutions(kappaLowRadiusSweep(1), ...
+    'rho',1e-2,true);
+solCG6_R35_Kappa= SweepSolutions(solCG6_Torque_RadSweep38(22), ...
+    'kappa',5e-4,true); 
+solCG6_R35_TorqueRho= SweepSolutions(solCG6_R35_Kappa(72), ...
+    'rho',1e-2,true);
+
+%% R=3.4m, grid of solutions
+testingTorque=SweepSolutions(solutionCG_Aligned_ControlTorque(1), ...
+    'FinalX_Position',[0:0.05:1]*1e-3,true); 
+testingTorqueK=SweepSolutions(testingTorque(end), ...
+    'kappa',1e-3,true); 
+testingTorqueKR=SweepSolutions(testingTorqueK(end), ...
+    'rho',1e-3,true); 
+
+torqueSeed =SweepSolutions(solutionCG_Aligned_ControlTorque, ...
+    'rho',.1,true);  
+
+seedA = testingTorque(end);
+seedA.problemParameters.constraint=sweepCG_Aligned_ConstrainedControlTorque_Mr(end).problemParameters.constraint;
+seedA = RerunSolution(seedA);
+seedA_Rad = SweepSolutions(seedA,'Radius',[.1:.05:3.5]*1e-3,true); 
+seedA_RadK = SweepSolutions(seedA_Rad(end),'kappa',1e-3,true); 
+seedA_RadKE = SweepSolutions(seedA_RadK(end),'epsilon',1e-2,true); 
+seedA_RadKER = SweepSolutions(seedA_RadK(17),'rho',1e-2,true); 
+seedA_RadKE_34 = SweepSolutions(seedA_RadK(17),'Radius',[3.5:-.01:3.4]*1e-3,true); 
+seedA_RadKER_34 = SweepSolutions(seedA_RadKE_34(end),'rho',1e-2,true); 
+
+seedB = SweepSolutions(torqueSeed(end), ...
+    'FinalX_Position',[0:-0.1:-1]*1e-3,true); 
+seedB(end).problemParameters.constraint=sweepCG_Aligned_ConstrainedControlTorque_Mr(end).problemParameters.constraint;
+seedB = RerunSolution(seedB(end));
+seedB_Rad = SweepSolutions(seedB,'Radius',[.1:.1:3.5]*1e-3,true); 
+seedB_RadK = SweepSolutions(seedB_Rad(end),'kappa',3e-3,true); 
+seedB_RadKE = SweepSolutions(seedB_RadK(end),'epsilon',1e-2,true); 
+seedB_RadKER = SweepSolutions(seedB_RadKE(end),'rho',1e-2,true); 
+seedB_RadKE_34 = SweepSolutions(seedB_RadKE(end),'Radius',[3.5:-.01:3.4]*1e-3,true); 
+seedB_RadKER_34 = SweepSolutions(seedB_RadKE_34(end),'rho',1e-2,true); 
+
+seedC = SweepSolutions(torqueSeed(end), ...
+    'FinalZ_Position',[0:0.1:1]*1e-3,true); 
+seedC(end).problemParameters.constraint=sweepCG_Aligned_ConstrainedControlTorque_Mr(end).problemParameters.constraint;
+seedC = RerunSolution(seedC(end));
+seedC_Rad = SweepSolutions(seedC,'Radius',[.1:.15:3.5]*1e-3,true); 
+seedC_RadK = SweepSolutions(seedC_Rad(end),'kappa',3e-3,true); 
+seedC_RadKE = SweepSolutions(seedC_RadK(end),'epsilon',1e-2,true); 
+seedC_RadKER = SweepSolutions(seedC_RadKE(end),'rho',1e-2,true); 
+
+seedD = SweepSolutions(torqueSeed(end), ...
+    'FinalZ_Position',[0:-0.1:-1]*1e-3,true); 
+seedD(end).problemParameters.constraint=sweepCG_Aligned_ConstrainedControlTorque_Mr(end).problemParameters.constraint;
+seedD = RerunSolution(seedD(end));
+seedD_Rad = SweepSolutions(seedD,'Radius',[.1:.15:3.5]*1e-3,true); 
+seedD_RadK = SweepSolutions(seedD_Rad(end),'kappa',3e-3,true); 
+seedD_RadKE = SweepSolutions(seedD_RadK(end),'epsilon',1e-2,true); 
+seedD_RadKER = SweepSolutions(seedD_RadKE(end),'rho',1e-2,true); 
+
+seedE_Rad = SweepSolutions(seedC_Rad(end), ...
+    'FinalX_Position',[0:-0.1:-1]*1e-3,true); 
+seedE_RadK = SweepSolutions(seedE_Rad(end),'kappa',3e-3,true); 
+seedE_RadKE = SweepSolutions(seedE_RadK(end),'epsilon',1e-2,true); 
+seedE_RadKER = SweepSolutions(seedE_RadKE(end),'rho',1e-2,true); 
+
+seedE = SweepSolutions(seedC(end), ...
+    'FinalX_Position',[0:-0.1:-1]*1e-3,true); 
+seedE_Rad2 = SweepSolutions(seedE(end),'Radius',[.1:.15:3.5]*1e-3,true); 
+seedE_Rad2K = SweepSolutions(seedE_Rad2(end),'kappa',3e-3,true); 
+seedE_Rad2KE = SweepSolutions(seedE_Rad2K(end),'epsilon',1e-2,true); 
+seedE_Rad2KER = SweepSolutions(seedE_Rad2KE(end),'rho',1e-2,true); 
+
+seedF_Rad = SweepSolutions(seedC_Rad(end), ...
+    'FinalX_Position',[0:0.1:1]*1e-3,true); 
+seedF_RadK = SweepSolutions(seedF_Rad(end),'kappa',3e-3,true); 
+seedF_RadKE = SweepSolutions(seedF_RadK(end),'epsilon',1e-2,true); 
+seedF_RadKER = SweepSolutions(seedF_RadKE(end),'rho',1e-2,true); 
+
+seedG_Rad = SweepSolutions(seedD_Rad(end), ...
+    'FinalX_Position',[0:-0.1:-1]*1e-3,true); 
+seedG_RadK = SweepSolutions(seedG_Rad(end),'kappa',3e-3,true); 
+seedG_RadKE = SweepSolutions(seedG_RadK(end),'epsilon',1e-2,true); 
+seedG_RadKER = SweepSolutions(seedG_RadKE(end),'rho',1e-2,true); 
+
+seedH_Rad = SweepSolutions(seedD_Rad(end), ...
+    'FinalX_Position',[0:0.1:1]*1e-3,true); 
+seedH_RadK = SweepSolutions(seedH_Rad(end),'kappa',3e-3,true); 
+seedH_RadKE = SweepSolutions(seedH_RadK(end),'epsilon',1e-2,true); 
+seedH_RadKER = SweepSolutions(seedH_RadKE(end),'rho',1e-2,true); 
+
+
+PlotSolution.Sweep6DOF(seedE_RadK);
+PlotSolution.Sweep6DOF(seedE_RadKER);
+PlotSolution.Sweep6DOF(seedE_Rad2KER);
+PlotSolution.ConvergedCostateTrace(seedA_RadK);
+
+testing = solCG6_Torque_RadSweep3(end);
+testing.problemParameters.dynamics.finalAttitudeFree = true; testing.solverParameters.fSolveOptions.MaxIterations=200;
+sol=RerunSolution(testing);
+freeMRP = SweepSolutions(sol, ...
+    'kappa',1e-2,true);
+freeMRPTinyKappa = SweepSolutions(freeMRP(end), ...
+    'kappa',1e-4,true);
+
+freeMRP1=SweepSolutions(freeMRPTinyKappa(3), ...
+    'rho',1e-2,true);
+freeMRP1eps=SweepSolutions(freeMRP1(end), ...
+    'epsilon',1e-2,true);
+
+
+freeMRPR32_Rad = SweepSolutions(freeMRPTinyKappa(1),...
+    'Radius',[3:.01:3.25]*1e-3,true);
+freeMRPR32_Kappa = SweepSolutions(freeMRPR32_Rad(end), ...
+    'kappa',1e-3,true);
+freeMRPR32_KR=SweepSolutions(freeMRPR32_Kappa(21), ...
+    'rho',1e-2,true);
+freeMRPR32_KRE=SweepSolutions(freeMRPR32_KR(end), ...
+    'epsilon',1e-2,true);
+
+
+PlotSolution.Sweep6DOF(freeMRPR32_KR); 
+PlotSolution.ThrustProfileAllEngines(freeMRPR32_KRE(end)); 
+PlotSolution.ConvergedCostateTrace(freeMRPR32_KR); 
+
+PlotSolution.SixDOF_Traj(freeMRPR32_KRE(end))
+for tim = [37]
+    PlotSolution.OrientationAtTime(freeMRPR32_KRE(end),tim,gca)
 end
-sol =  solutionCG_Constraint2CheaperTorque_Sr_Se(end);
-PlotSolution.States(sol);
-
-%% 6x CG aligned with control torque and 1.4m spherical constraint, free final MRP
-testing = solutionCG_Aligned_ConstrainedControlTorqueR2(1);
-testing.problemParameters.dynamics.finalAttitudeFree = true;
-
-k=RerunSolution(testing);
-solCG6_Constraint_1_4_Torque_FreeMRP = SweepSolutions(k,'Radius', ...
-    [0.1:.025:1.4]./1000,true);
-PlotSolution.ThrustProfileAllEngines(solCG6_Constraint_1_4_Torque_FreeMRP(end));
-PlotSolution.ConvergedCostateTrace(solCG6_Constraint_1_4_Torque_FreeMRP);
-PlotSolution.RotationalSummary(solCG6_Constraint_1_4_Torque_FreeMRP(end));
 
 
-%% 6x CG aligned with control torque and 2m spherical constraint, free final MRP
-testing3= SweepSolutions(solCG6_Constraint_1_4_Torque_FreeMRP(end),'kappa', ...
-    .5,true);
-PlotSolution.ThrustProfileAllEngines(testing3(end));
-PlotSolution.ConvergedCostateTrace(testing3);
-PlotSolution.RotationalSummary(testing3(end));
+% Larger values of R
+solCG6_R32_TorqueKappa= SweepSolutions(solCG6_Torque_RadSweep38(10), ...
+    'kappa',1e-3,true);
+solCG6_R32_TorqueRho= SweepSolutions(solCG6_R32_TorqueKappa(end), ...
+    'rho',1e-2,true);
+solCG6_R32_TorqueEps= SweepSolutions(solCG6_R32_TorqueRho(end), ...
+    'epsilon',1e-2,true);
 
-solCG6_Constraint_1_8_Torque_FreeMRP = SweepSolutions(testing3(end),'Radius', ...
-    [1.4:.01:1.8]./1000,true);
-testing2 = SweepSolutions(solCG6_Constraint_1_8_Torque_FreeMRP(end),'epsilon', ...
-    .05,true);
-solCG6_Constraint_2_Torque_FreeMRP = SweepSolutions(testing2(end),'Radius', ...
-    [1.8:.01:2]./1000,true);
-testing4= SweepSolutions(solCG6_Constraint_2_Torque_FreeMRP(end),'kappa', ...
-    .25,true);
-PlotSolution.ConvergedCostateTrace(testing4);
-PlotSolution.ThrustProfileAllEngines(solCG6_Constraint_2_Torque_FreeMRP(end));
-PlotSolution.ConvergedCostateTrace(solCG6_Constraint_2_Torque_FreeMRP);
-PlotSolution.RotationalSummary(solCG6_Constraint_2_Torque_FreeMRP(end));
+solCG6_R35_TorqueKappa= SweepSolutions(solCG6_Torque_RadSweep38(22), ...
+    'kappa',1e-3,true);
+solCG6_R35_TorqueRho= SweepSolutions(solCG6_R35_TorqueKappa(end), ...
+    'rho',1e-2,true);
+solCG6_R35_TorqueEps= SweepSolutions(solCG6_R35_TorqueRho(end), ...
+    'epsilon',1e-2,true);
 
-solCG6_Constraint2_Torque_FreeMRP_SmallRho = SweepSolutions(testing4(end),'rho', ...
-    0.01,true);
-PlotSolution.ThrustProfileAllEngines(solCG6_Constraint2_Torque_FreeMRP_SmallRho(end));
-PlotSolution.ConvergedCostateTrace(solCG6_Constraint2_Torque_FreeMRP_SmallRho);
-PlotSolution.RotationalSummary(solCG6_Constraint2_Torque_FreeMRP_SmallRho(end));
-solCG6_Constraint2_Torque_FreeMRP_VerySmallEpsilon = SweepSolutions(solCG6_Constraint2_Torque_FreeMRP_SmallRho(end),'epsilon', ...
-    0.001,true);
-solCG6_Constraint2_Torque_FreeMRP_VVSe = SweepSolutions(solCG6_Constraint2_Torque_FreeMRP_VerySmallEpsilon(end),'epsilon', ...
-    1e-5,true);
-PlotSolution.ThrustProfileAllEngines(solCG6_Constraint2_Torque_FreeMRP_VVSe(end));
-solCG6_Constraint2_Torque_FreeMRP_VerySmallRho = SweepSolutions(solCG6_Constraint2_Torque_FreeMRP_VVSe(end),'rho', ...
-    0.002,true);
-sol = solCG6_Constraint2_Torque_FreeMRP_VerySmallRho(end);
-PlotSolution.SixDOF_Traj(sol)
-PlotSolution.PlotOrientationChaserRelativeToTranslationalFrame(sol.x(end,8:10)',sol.x(end,1:3)'*1e3,sol.t(end),sol.problemParameters,gca)
-PlotSolution.CostBreakdown(sol);
-PlotSolution.RotationalSummary(sol)
-PlotSolution.ConvergedCostateTrace(solCG6_Constraint2_Torque_FreeMRP_VerySmallRho)
-PlotSolution.ThrustProfileAllEngines(sol);
-% Compare cost breakdown vs when MRP is not free 
+solCG6_R35_TorqueKE= SweepSolutions(solCG6_R35_TorqueKappa(end), ...
+    'epsilon',1e-2,true);
+solCG6_R35_TorqueKER= SweepSolutions(solCG6_R35_TorqueKE(end), ...
+    'rho',1e-2,true);
+
+solCG6_R38_TorqueKappa= SweepSolutions(solCG6_Torque_RadSweep38(end), ...
+    'kappa',1e-3,true); 
+solCG6_R38_TorqueKE= SweepSolutions(solCG6_R38_TorqueKappa(end), ...
+    'epsilon',1e-2,true);
+solCG6_R38_TorqueKRadER= SweepSolutions(sol, ...
+    'rho',1e-2,true); % not working
+
+solCG6_R38_TorqueE= SweepSolutions(solCG6_Torque_RadSweep38(end), ...
+    'epsilon',1e-2,true); % still not working 
+
 
 end
 

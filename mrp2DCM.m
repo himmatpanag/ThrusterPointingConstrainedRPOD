@@ -4,6 +4,6 @@ function DCM = mrp2DCM(p)
     temp = (1+p2)^2;
 
     % Translational dynamics are in a rotating reference frame
-    DCM = eye(3) - 4*(1-p2)/temp*pCross + 8/temp * (p*p');
+    DCM = eye(3) - 4*(1-p2)/temp*pCross + 8/temp * pCross^2;
 
 end

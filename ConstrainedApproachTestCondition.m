@@ -59,6 +59,8 @@ function [problemParameters, solverParameters] = ConstrainedApproachTestConditio
     problemParameters.dynamics.maxEngineFlowRate = problemParameters.u_max/c; 
     problemParameters.dynamics.exhaustVelocity = c; 
     problemParameters.dynamics.attitudeActuator = ATTITUDE_CONTROL_TYPE.NONE;
+    problemParameters.dynamics.torqueCostMultiplier = 1; % typical fuel consumption should be < 1g. We want this multiplier to be 100x less than the fuel consumption
+    problemParameters.dynamics.maxControlTorque = .5;
 
 switch caseNum
     case {0,1,2,3,4}
@@ -149,6 +151,7 @@ switch caseNum
         problemParameters.dynamics.initialMass = problemParameters.initialMass;
         problemParameters.constraint.epsilon = 0.5;
         problemParameters.constraint.simplified = false;
+        problemParameters.constraint.targetRadius = 10.0;
         switch thrusterConfig
             case {THRUSTER_CONFIGURATION.CG_ALIGNED_6,THRUSTER_CONFIGURATION.CG_ALIGNED_CANTED_8}
             otherwise

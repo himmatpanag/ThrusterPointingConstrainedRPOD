@@ -1,10 +1,14 @@
-function [lambdaDot, E_p, E_r, E_t] = CostateDerivativesSymbolic6DOF(t,X,dynamics,delta,Phi,eta,etaPrime,constraint)
-    I1_1 = dynamics.inertia(1,1); I1_2 = dynamics.inertia(1,2); I1_3 = dynamics.inertia(1,3);
-    I2_1 = dynamics.inertia(2,1); I2_2 = dynamics.inertia(2,2); I2_3 = dynamics.inertia(2,3);
-    I3_1 = dynamics.inertia(3,1); I3_2 = dynamics.inertia(3,2); I3_3 = dynamics.inertia(3,3);
-    Iinv1_1 = dynamics.inertiaInverse(1,1); Iinv1_2 = dynamics.inertiaInverse(1,2); Iinv1_3 = dynamics.inertiaInverse(1,3);
-    Iinv2_1 = dynamics.inertiaInverse(2,1); Iinv2_2 = dynamics.inertiaInverse(2,2); Iinv2_3 = dynamics.inertiaInverse(2,3);
-    Iinv3_1 = dynamics.inertiaInverse(3,1); Iinv3_2 = dynamics.inertiaInverse(3,2); Iinv3_3 = dynamics.inertiaInverse(3,3);
+function [lambdaDot, E_p, E_r, E_t] = CostateDerivativesSymbolic6DOF(t,X,...
+    inertia,inertiaInverse,frameRotationRate,exhaustVelocity,...
+    numEngines,engineLocationBody,thrustDirectionBody,maxThrust ,delta,Phi,eta,etaPrime,...
+    constraintType,targetRadius)
+
+    I1_1 = inertia(1,1); I1_2 = inertia(1,2); I1_3 = inertia(1,3);
+    I2_1 = inertia(2,1); I2_2 = inertia(2,2); I2_3 = inertia(2,3);
+    I3_1 = inertia(3,1); I3_2 = inertia(3,2); I3_3 = inertia(3,3);
+    Iinv1_1 = inertiaInverse(1,1); Iinv1_2 = inertiaInverse(1,2); Iinv1_3 = inertiaInverse(1,3);
+    Iinv2_1 = inertiaInverse(2,1); Iinv2_2 = inertiaInverse(2,2); Iinv2_3 = inertiaInverse(2,3);
+    Iinv3_1 = inertiaInverse(3,1); Iinv3_2 = inertiaInverse(3,2); Iinv3_3 = inertiaInverse(3,3);
     r1 = X(1); r2 = X(2); r3 = X(3); 
     m = X(7); 
     p1 = X(8); p2 = X(9); p3 = X(10);
@@ -16,8 +20,8 @@ function [lambdaDot, E_p, E_r, E_t] = CostateDerivativesSymbolic6DOF(t,X,dynamic
     lambda_p1 = X(21); lambda_p2 = X(22); lambda_p3 = X(23);
     lambda_w1 = X(24); lambda_w2 = X(25); lambda_w3 = X(26);
 
-    W = dynamics.frameRotationRate;
-    c = dynamics.exhaustVelocity;
+    W = frameRotationRate;
+    c = exhaustVelocity;
 
     %% Efficiency improvements
     pNorm1 = p1^2 + p2^2 + p3^2 + 1;
@@ -50,20 +54,20 @@ function [lambdaDot, E_p, E_r, E_t] = CostateDerivativesSymbolic6DOF(t,X,dynamic
         lambda_p2*(p1/2 - (p2*p3)/2) - lambda_p1*(p2/2 + (p1*p3)/2) + lambda_w1*(Iinv1_3*(I1_3*w2 - I2_3*w1) - Iinv1_2*(I1_1*w1 + I1_2*w2 + 2*I1_3*w3 - I3_3*w1) + Iinv1_1*(I2_1*w1 + I2_2*w2 + 2*I2_3*w3 - I3_3*w2)) + lambda_w2*(Iinv2_3*(I1_3*w2 - I2_3*w1) - Iinv2_2*(I1_1*w1 + I1_2*w2 + 2*I1_3*w3 - I3_3*w1) + Iinv2_1*(I2_1*w1 + I2_2*w2 + 2*I2_3*w3 - I3_3*w2)) + lambda_w3*(Iinv3_3*(I1_3*w2 - I2_3*w1) - Iinv3_2*(I1_1*w1 + I1_2*w2 + 2*I1_3*w3 - I3_3*w1) + Iinv3_1*(I2_1*w1 + I2_2*w2 + 2*I2_3*w3 - I3_3*w2)) + lambda_p3*(p1^2/4 + p2^2/4 - p3^2/4 - 1/4)
         ];
     
-    E_p = zeros(3,dynamics.numEngines); 
-    E_r = zeros(3,dynamics.numEngines);
-    E_t = zeros(dynamics.numEngines,1);
-    for ii = 1:dynamics.numEngines
-        u1 = dynamics.thrustDirectionBody(1,ii); u2 = dynamics.thrustDirectionBody(2,ii); u3 = dynamics.thrustDirectionBody(3,ii);
-        T = dynamics.maxThrust(ii);
-        if constraint.type ~= POINTING_CONSTRAINT_TYPE.NONE
-            R = constraint.targetRadius;
-            d1 = dynamics.engineLocationBody(1,ii); d2 = dynamics.engineLocationBody(2,ii); d3 = dynamics.engineLocationBody(3,ii);
-            rB = Phi'*[r1;r2;r3]+dynamics.engineLocationBody(:,ii);
+    E_p = zeros(3,numEngines); 
+    E_r = zeros(3,numEngines);
+    E_t = zeros(numEngines,1);
+    for ii = 1:numEngines
+        u1 = thrustDirectionBody(1,ii); u2 = thrustDirectionBody(2,ii); u3 = thrustDirectionBody(3,ii);
+        T = maxThrust(ii);
+        if constraintType ~= POINTING_CONSTRAINT_TYPE.NONE
+            R = targetRadius;
+            d1 = engineLocationBody(1,ii); d2 = engineLocationBody(2,ii); d3 = engineLocationBody(3,ii);
+            rB = Phi'*[r1;r2;r3]+engineLocationBody(:,ii);
 
             etaCoeff = T*delta(ii)*((u3*(lambda_v1*(C*((8*p1*p3)/pNorm2 + (p2*(pNorm3))/pNorm2) + S*((8*p2*p3)/pNorm2 - (p1*(pNorm3))/pNorm2)) + lambda_v2*(C*((8*p2*p3)/pNorm2 - (p1*(pNorm3))/pNorm2) - S*((8*p1*p3)/pNorm2 + (p2*(pNorm3))/pNorm2)) - lambda_v3*((8*p1^2)/pNorm2 + (8*p2^2)/pNorm2 - 1)) + u1*(lambda_v3*((8*p1*p3)/pNorm2 - (p2*(pNorm3))/pNorm2) - lambda_v1*(C*((8*p2^2)/pNorm2 + (8*p3^2)/pNorm2 - 1) - S*((8*p1*p2)/pNorm2 + (p3*(pNorm3))/pNorm2)) + lambda_v2*(S*((8*p2^2)/pNorm2 + (8*p3^2)/pNorm2 - 1) + C*((8*p1*p2)/pNorm2 + (p3*(pNorm3))/pNorm2))) - u2*(lambda_v1*(S*((8*p1^2)/pNorm2 + (8*p3^2)/pNorm2 - 1) - C*((8*p1*p2)/pNorm2 - (p3*(pNorm3))/pNorm2)) - lambda_v3*((8*p2*p3)/pNorm2 + (p1*(pNorm3))/pNorm2) + lambda_v2*(C*((8*p1^2)/pNorm2 + (8*p3^2)/pNorm2 - 1) + S*((8*p1*p2)/pNorm2 - (p3*(pNorm3))/pNorm2))))/m - lambda_m/c + (d2*u3 - d3*u2)*(Iinv1_1*lambda_w1 + Iinv2_1*lambda_w2 + Iinv3_1*lambda_w3) - (d1*u3 - d3*u1)*(Iinv1_2*lambda_w1 + Iinv2_2*lambda_w2 + Iinv3_2*lambda_w3) + (d1*u2 - d2*u1)*(Iinv1_3*lambda_w1 + Iinv2_3*lambda_w2 + Iinv3_3*lambda_w3));
  
-            if rB'*dynamics.thrustDirectionBody(:,ii) >= 0
+            if rB'*thrustDirectionBody(:,ii) >= 0
                 E_p(:,ii) = [
                                                                                                                                       d3*(2*r1*(S*((8*p1^2)/pNorm2 + (pNorm3)/pNorm2 - (4*p1^2*(pNorm3))/pNorm13 + (32*p1*p2*p3)/pNorm13) - C*((8*p3)/pNorm2 + (8*p1*p2)/pNorm2 - (32*p1^2*p3)/pNorm13 - (4*p1*p2*(pNorm3))/pNorm13)) - 2*r3*((32*p1^3)/pNorm13 - (16*p1)/pNorm2 + (32*p1*p2^2)/pNorm13) + 2*r2*(C*((8*p1^2)/pNorm2 + (pNorm3)/pNorm2 - (4*p1^2*(pNorm3))/pNorm13 + (32*p1*p2*p3)/pNorm13) + S*((8*p3)/pNorm2 + (8*p1*p2)/pNorm2 - (32*p1^2*p3)/pNorm13 - (4*p1*p2*(pNorm3))/pNorm13))) + 2*(u2*(r3*((8*p1^2)/pNorm2 + (pNorm3)/pNorm2 - (4*p1^2*(pNorm3))/pNorm13 - (32*p1*p2*p3)/pNorm13) + r1*(S*((32*p1^3)/pNorm13 - (16*p1)/pNorm2 + (32*p1*p3^2)/pNorm13) + C*((8*p2)/pNorm2 - (8*p1*p3)/pNorm2 - (32*p1^2*p2)/pNorm13 + (4*p1*p3*(pNorm3))/pNorm13)) + r2*(C*((32*p1^3)/pNorm13 - (16*p1)/pNorm2 + (32*p1*p3^2)/pNorm13) - S*((8*p2)/pNorm2 - (8*p1*p3)/pNorm2 - (32*p1^2*p2)/pNorm13 + (4*p1*p3*(pNorm3))/pNorm13))) - u3*(r1*(S*((8*p1^2)/pNorm2 + (pNorm3)/pNorm2 - (4*p1^2*(pNorm3))/pNorm13 + (32*p1*p2*p3)/pNorm13) - C*((8*p3)/pNorm2 + (8*p1*p2)/pNorm2 - (32*p1^2*p3)/pNorm13 - (4*p1*p2*(pNorm3))/pNorm13)) - r3*((32*p1^3)/pNorm13 - (16*p1)/pNorm2 + (32*p1*p2^2)/pNorm13) + r2*(C*((8*p1^2)/pNorm2 + (pNorm3)/pNorm2 - (4*p1^2*(pNorm3))/pNorm13 + (32*p1*p2*p3)/pNorm13) + S*((8*p3)/pNorm2 + (8*p1*p2)/pNorm2 - (32*p1^2*p3)/pNorm13 - (4*p1*p2*(pNorm3))/pNorm13))) + u1*(r1*(C*((32*p1*p2^2)/pNorm13 + (32*p1*p3^2)/pNorm13) + S*((8*p2)/pNorm2 + (8*p1*p3)/pNorm2 - (32*p1^2*p2)/pNorm13 - (4*p1*p3*(pNorm3))/pNorm13)) + r2*(C*((8*p2)/pNorm2 + (8*p1*p3)/pNorm2 - (32*p1^2*p2)/pNorm13 - (4*p1*p3*(pNorm3))/pNorm13) - S*((32*p1*p2^2)/pNorm13 + (32*p1*p3^2)/pNorm13)) + r3*((8*p3)/pNorm2 - (8*p1*p2)/pNorm2 - (32*p1^2*p3)/pNorm13 + (4*p1*p2*(pNorm3))/pNorm13)))*(u3*(d3 + r1*(C*((8*p1*p3)/pNorm2 + (p2*(pNorm3))/pNorm2) + S*((8*p2*p3)/pNorm2 - (p1*(pNorm3))/pNorm2)) + r2*(C*((8*p2*p3)/pNorm2 - (p1*(pNorm3))/pNorm2) - S*((8*p1*p3)/pNorm2 + (p2*(pNorm3))/pNorm2)) - r3*((8*p1^2)/pNorm2 + (8*p2^2)/pNorm2 - 1)) + u1*(d1 + r3*((8*p1*p3)/pNorm2 - (p2*(pNorm3))/pNorm2) - r1*(C*((8*p2^2)/pNorm2 + (8*p3^2)/pNorm2 - 1) - S*((8*p1*p2)/pNorm2 + (p3*(pNorm3))/pNorm2)) + r2*(S*((8*p2^2)/pNorm2 + (8*p3^2)/pNorm2 - 1) + C*((8*p1*p2)/pNorm2 + (p3*(pNorm3))/pNorm2))) + u2*(d2 + r3*((8*p2*p3)/pNorm2 + (p1*(pNorm3))/pNorm2) - r1*(S*((8*p1^2)/pNorm2 + (8*p3^2)/pNorm2 - 1) - C*((8*p1*p2)/pNorm2 - (p3*(pNorm3))/pNorm2)) - r2*(C*((8*p1^2)/pNorm2 + (8*p3^2)/pNorm2 - 1) + S*((8*p1*p2)/pNorm2 - (p3*(pNorm3))/pNorm2)))) - d2*(2*r3*((8*p1^2)/pNorm2 + (pNorm3)/pNorm2 - (4*p1^2*(pNorm3))/pNorm13 - (32*p1*p2*p3)/pNorm13) + 2*r1*(S*((32*p1^3)/pNorm13 - (16*p1)/pNorm2 + (32*p1*p3^2)/pNorm13) + C*((8*p2)/pNorm2 - (8*p1*p3)/pNorm2 - (32*p1^2*p2)/pNorm13 + (4*p1*p3*(pNorm3))/pNorm13)) + 2*r2*(C*((32*p1^3)/pNorm13 - (16*p1)/pNorm2 + (32*p1*p3^2)/pNorm13) - S*((8*p2)/pNorm2 - (8*p1*p3)/pNorm2 - (32*p1^2*p2)/pNorm13 + (4*p1*p3*(pNorm3))/pNorm13))) - d1*(2*r1*(C*((32*p1*p2^2)/pNorm13 + (32*p1*p3^2)/pNorm13) + S*((8*p2)/pNorm2 + (8*p1*p3)/pNorm2 - (32*p1^2*p2)/pNorm13 - (4*p1*p3*(pNorm3))/pNorm13)) + 2*r2*(C*((8*p2)/pNorm2 + (8*p1*p3)/pNorm2 - (32*p1^2*p2)/pNorm13 - (4*p1*p3*(pNorm3))/pNorm13) - S*((32*p1*p2^2)/pNorm13 + (32*p1*p3^2)/pNorm13)) + 2*r3*((8*p3)/pNorm2 - (8*p1*p2)/pNorm2 - (32*p1^2*p3)/pNorm13 + (4*p1*p2*(pNorm3))/pNorm13))
                                                                                                                                       2*(u3*(r3*((32*p2^3)/pNorm13 - (16*p2)/pNorm2 + (32*p1^2*p2)/pNorm13) + r1*(C*((8*p2^2)/pNorm2 + (pNorm3)/pNorm2 - (4*p2^2*(pNorm3))/pNorm13 - (32*p1*p2*p3)/pNorm13) + S*((8*p3)/pNorm2 - (8*p1*p2)/pNorm2 - (32*p2^2*p3)/pNorm13 + (4*p1*p2*(pNorm3))/pNorm13)) - r2*(S*((8*p2^2)/pNorm2 + (pNorm3)/pNorm2 - (4*p2^2*(pNorm3))/pNorm13 - (32*p1*p2*p3)/pNorm13) - C*((8*p3)/pNorm2 - (8*p1*p2)/pNorm2 - (32*p2^2*p3)/pNorm13 + (4*p1*p2*(pNorm3))/pNorm13))) - u1*(r3*((8*p2^2)/pNorm2 + (pNorm3)/pNorm2 - (4*p2^2*(pNorm3))/pNorm13 + (32*p1*p2*p3)/pNorm13) - r1*(C*((32*p2^3)/pNorm13 - (16*p2)/pNorm2 + (32*p2*p3^2)/pNorm13) + S*((8*p1)/pNorm2 + (8*p2*p3)/pNorm2 - (32*p1*p2^2)/pNorm13 - (4*p2*p3*(pNorm3))/pNorm13)) + r2*(S*((32*p2^3)/pNorm13 - (16*p2)/pNorm2 + (32*p2*p3^2)/pNorm13) - C*((8*p1)/pNorm2 + (8*p2*p3)/pNorm2 - (32*p1*p2^2)/pNorm13 - (4*p2*p3*(pNorm3))/pNorm13))) + u2*(r1*(C*((8*p1)/pNorm2 - (8*p2*p3)/pNorm2 - (32*p1*p2^2)/pNorm13 + (4*p2*p3*(pNorm3))/pNorm13) + S*((32*p1^2*p2)/pNorm13 + (32*p2*p3^2)/pNorm13)) + r2*(C*((32*p1^2*p2)/pNorm13 + (32*p2*p3^2)/pNorm13) - S*((8*p1)/pNorm2 - (8*p2*p3)/pNorm2 - (32*p1*p2^2)/pNorm13 + (4*p2*p3*(pNorm3))/pNorm13)) + r3*((8*p3)/pNorm2 + (8*p1*p2)/pNorm2 - (32*p2^2*p3)/pNorm13 - (4*p1*p2*(pNorm3))/pNorm13)))*(u3*(d3 + r1*(C*((8*p1*p3)/pNorm2 + (p2*(pNorm3))/pNorm2) + S*((8*p2*p3)/pNorm2 - (p1*(pNorm3))/pNorm2)) + r2*(C*((8*p2*p3)/pNorm2 - (p1*(pNorm3))/pNorm2) - S*((8*p1*p3)/pNorm2 + (p2*(pNorm3))/pNorm2)) - r3*((8*p1^2)/pNorm2 + (8*p2^2)/pNorm2 - 1)) + u1*(d1 + r3*((8*p1*p3)/pNorm2 - (p2*(pNorm3))/pNorm2) - r1*(C*((8*p2^2)/pNorm2 + (8*p3^2)/pNorm2 - 1) - S*((8*p1*p2)/pNorm2 + (p3*(pNorm3))/pNorm2)) + r2*(S*((8*p2^2)/pNorm2 + (8*p3^2)/pNorm2 - 1) + C*((8*p1*p2)/pNorm2 + (p3*(pNorm3))/pNorm2))) + u2*(d2 + r3*((8*p2*p3)/pNorm2 + (p1*(pNorm3))/pNorm2) - r1*(S*((8*p1^2)/pNorm2 + (8*p3^2)/pNorm2 - 1) - C*((8*p1*p2)/pNorm2 - (p3*(pNorm3))/pNorm2)) - r2*(C*((8*p1^2)/pNorm2 + (8*p3^2)/pNorm2 - 1) + S*((8*p1*p2)/pNorm2 - (p3*(pNorm3))/pNorm2)))) - d3*(2*r3*((32*p2^3)/pNorm13 - (16*p2)/pNorm2 + (32*p1^2*p2)/pNorm13) + 2*r1*(C*((8*p2^2)/pNorm2 + (pNorm3)/pNorm2 - (4*p2^2*(pNorm3))/pNorm13 - (32*p1*p2*p3)/pNorm13) + S*((8*p3)/pNorm2 - (8*p1*p2)/pNorm2 - (32*p2^2*p3)/pNorm13 + (4*p1*p2*(pNorm3))/pNorm13)) - 2*r2*(S*((8*p2^2)/pNorm2 + (pNorm3)/pNorm2 - (4*p2^2*(pNorm3))/pNorm13 - (32*p1*p2*p3)/pNorm13) - C*((8*p3)/pNorm2 - (8*p1*p2)/pNorm2 - (32*p2^2*p3)/pNorm13 + (4*p1*p2*(pNorm3))/pNorm13))) + d1*(2*r3*((8*p2^2)/pNorm2 + (pNorm3)/pNorm2 - (4*p2^2*(pNorm3))/pNorm13 + (32*p1*p2*p3)/pNorm13) - 2*r1*(C*((32*p2^3)/pNorm13 - (16*p2)/pNorm2 + (32*p2*p3^2)/pNorm13) + S*((8*p1)/pNorm2 + (8*p2*p3)/pNorm2 - (32*p1*p2^2)/pNorm13 - (4*p2*p3*(pNorm3))/pNorm13)) + 2*r2*(S*((32*p2^3)/pNorm13 - (16*p2)/pNorm2 + (32*p2*p3^2)/pNorm13) - C*((8*p1)/pNorm2 + (8*p2*p3)/pNorm2 - (32*p1*p2^2)/pNorm13 - (4*p2*p3*(pNorm3))/pNorm13))) - d2*(2*r1*(C*((8*p1)/pNorm2 - (8*p2*p3)/pNorm2 - (32*p1*p2^2)/pNorm13 + (4*p2*p3*(pNorm3))/pNorm13) + S*((32*p1^2*p2)/pNorm13 + (32*p2*p3^2)/pNorm13)) + 2*r2*(C*((32*p1^2*p2)/pNorm13 + (32*p2*p3^2)/pNorm13) - S*((8*p1)/pNorm2 - (8*p2*p3)/pNorm2 - (32*p1*p2^2)/pNorm13 + (4*p2*p3*(pNorm3))/pNorm13)) + 2*r3*((8*p3)/pNorm2 + (8*p1*p2)/pNorm2 - (32*p2^2*p3)/pNorm13 - (4*p1*p2*(pNorm3))/pNorm13))
@@ -99,7 +103,7 @@ function [lambdaDot, E_p, E_r, E_t] = CostateDerivativesSymbolic6DOF(t,X,dynamic
             end
         end
         
-        lambda_mDot = lambda_mDot + T/(m^2) * delta(ii)*eta(ii)*lambda_v'*Phi*dynamics.thrustDirectionBody(:,ii);
+        lambda_mDot = lambda_mDot + T/(m^2) * delta(ii)*eta(ii)*lambda_v'*Phi*thrustDirectionBody(:,ii);
 
         lambda_pDot = lambda_pDot + T/m * delta(ii) *eta(ii)*[
             u3*(lambda_v1*(S*((8*p1^2)/pNorm2 + (pNorm3)/pNorm2 - (4*p1^2*(pNorm3))/pNorm13 + (32*p1*p2*p3)/pNorm13) - C*((8*p3)/pNorm2 + (8*p1*p2)/pNorm2 - (32*p1^2*p3)/pNorm13 - (4*p1*p2*(pNorm3))/pNorm13)) - lambda_v3*((32*p1^3)/pNorm13 - (16*p1)/pNorm2 + (32*p1*p2^2)/pNorm13) + lambda_v2*(C*((8*p1^2)/pNorm2 + (pNorm3)/pNorm2 - (4*p1^2*(pNorm3))/pNorm13 + (32*p1*p2*p3)/pNorm13) + S*((8*p3)/pNorm2 + (8*p1*p2)/pNorm2 - (32*p1^2*p3)/pNorm13 - (4*p1*p2*(pNorm3))/pNorm13))) - u2*(lambda_v3*((8*p1^2)/pNorm2 + (pNorm3)/pNorm2 - (4*p1^2*(pNorm3))/pNorm13 - (32*p1*p2*p3)/pNorm13) + lambda_v1*(S*((32*p1^3)/pNorm13 - (16*p1)/pNorm2 + (32*p1*p3^2)/pNorm13) + C*((8*p2)/pNorm2 - (8*p1*p3)/pNorm2 - (32*p1^2*p2)/pNorm13 + (4*p1*p3*(pNorm3))/pNorm13)) + lambda_v2*(C*((32*p1^3)/pNorm13 - (16*p1)/pNorm2 + (32*p1*p3^2)/pNorm13) - S*((8*p2)/pNorm2 - (8*p1*p3)/pNorm2 - (32*p1^2*p2)/pNorm13 + (4*p1*p3*(pNorm3))/pNorm13))) - u1*(lambda_v3*((8*p3)/pNorm2 - (8*p1*p2)/pNorm2 - (32*p1^2*p3)/pNorm13 + (4*p1*p2*(pNorm3))/pNorm13) + lambda_v1*(C*((32*p1*p2^2)/pNorm13 + (32*p1*p3^2)/pNorm13) + S*((8*p2)/pNorm2 + (8*p1*p3)/pNorm2 - (32*p1^2*p2)/pNorm13 - (4*p1*p3*(pNorm3))/pNorm13)) + lambda_v2*(C*((8*p2)/pNorm2 + (8*p1*p3)/pNorm2 - (32*p1^2*p2)/pNorm13 - (4*p1*p3*(pNorm3))/pNorm13) - S*((32*p1*p2^2)/pNorm13 + (32*p1*p3^2)/pNorm13)))

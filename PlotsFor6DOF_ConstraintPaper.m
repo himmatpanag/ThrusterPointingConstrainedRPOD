@@ -1,388 +1,427 @@
-youfunction PlotsFor6DOF_ConstraintPaper
-% This function contains results generated for 6DOF RPOD. 
-parallelFSolveOptions = optimoptions('fsolve','Display','iter','MaxFunEvals',1e3,...
-    'MaxIter',3e1,'TolFun',1e-12,'TolX',1e-11,...
-    'UseParallel',false); % fsolve   
+function PlotsFor6DOF_ConstraintPaper
+%% This function contains results generated for the 6DOF RPOD paper 
 
-%% Unconstrained solution to 6x CG Aligned thrusters
-%engineType = 1; % ION
-%engineType = 2; % BIPROPELLANT
+% Optimal Six-DOF Trajectories for Proximity Operations with Thruster 
+% Pointing Pointing Constraints using Indirect Optimization
+
+saveDir = '/Users/himmatpanag/Documents/UIUC/Papers/2025 AAS SFM AAC/Figs/';
+
 engineType = 3; % MONOPROPELLANT
 % engineType = 4; % COLD GAS
 [problemParameters, solverParameters] = ConstrainedApproachTestCondition(1011,engineType,THRUSTER_CONFIGURATION.CG_ALIGNED_6);
+[pp_CG8, ~] = ConstrainedApproachTestCondition(1011,engineType,THRUSTER_CONFIGURATION.CG_ALIGNED_CANTED_8);
 
-solutionCG_AlignedUnconstrained.solutionFound = false; 
-solverParameters.initialCostateGuess = [-0.000089618015403   2.382117256137634   0.000000000000000  -2.076139519736225  57.115489612329533  -0.000000000000000   0.000142936265578  -0.000008931051246  -0.000001093674343 0.000003524540051  -0.000071361039315  -0.000010314917224   0.000008709836245]';
- 
-while any(~solutionCG_AlignedUnconstrained.solutionFound)
-    solverParameters.initialCostateGuess = [rand(3,1)/1e3;rand(3,1);.01;rand(6,1)*1e-3]*1e-3;
+load("ASC_and_JSR_Results.mat")
+
+%% First plot figures showing the transfer
+hf1 = figure('Name','EngineConfigs1');
+ax1 = subplot(1,2,1);
+PlotSolution.InitialOrientation(problemParameters,ax1); legend('hide');
+ax2 = subplot(1,2,2);
+PlotSolution.InitialOrientation(pp_CG8,ax2);
+saveFigFcn(hf1,saveDir);
+
+%% Figure showing engine 5 plume active 
+hUnconstEng5 = figure('Name','UnconstEng5Active');
+grid on; hold on; ax1 = gca;
+solution = solutionCG_AlignedUnconstrainedrhoSweep(end);
+plot3(solution.x(:,1)*1e3,solution.x(:,2)*1e3,solution.x(:,3)*1e3,'k','LineWidth',2,'DisplayName','Unconstrained Trajectory')
+plot3(0,0,0,'m.','MarkerSize',80,'DisplayName','Target Location')
+plot3(x(1,1), x(1,2), x(1,3),'bo','MarkerSize',10,'LineWidth',2,'DisplayName','Chaser Initial')
+plot3(x(end,1), x(end,2), x(end,3),'bx','MarkerSize',13,'LineWidth',2,'DisplayName','Chaser Final')
+customPlot.cubeOpacity=0.0;
+customPlot.coneHeightFactor=1.5;
+customPlot.coneOffOpacity=1;
+customPlot.cubeLengthScale=1;
+customPlot.handVis = 'on'; 
+PlotSolution.OrientationAtTime(solution,0,ax1,customPlot);
+customPlot.handVis = 'off'; 
+PlotSolution.OrientationAtTime(solution,solution.t(end),ax1,customPlot);
+hUnconstEng5.Position = [  1914         333        1150         642];
+ax1.Legend.Position=[ 0.1000    0.4459    0.2483    0.3752];
+ax1.View=[ 43.1606   22.8059]; ylabel('Along Track (m)'); xlabel('Radial (m)')
+zlabel('Out of Plane (m)');
+saveFigFcn(hUnconstEng5,saveDir);
+
+%% Comparison figure
+hf2 = figure('Name','3DOF_Comparison');
+ax1 = subplot(2,2,3); grid on; hold on; 
+sol3DOF = sphericalTargetRadius2_RhoSweep(end);
+sol6DOF = solCG6_Constraint2_Torque_FreeMRP_VerySmallRho(end);
+titles = {'x','y','z'};
+for ii = 1:3
+    plot(sol3DOF.t,1e3.*sol3DOF.x(:,ii),'-','LineWidth',1,'DisplayName',[titles{ii},'_{3DOF}'])
+    ReduceColorOrderIndex(ax1); 
+    plot(sol6DOF.t,1e3.*sol6DOF.x(:,ii),'--','LineWidth',1,'DisplayName',[titles{ii},'_{6DOF}'])
+end
+xlabel('Time (s)'); ylabel('Position (m)'); legend('show','Location','best')
+
+ax2 = subplot(2,2,2);
+PlotSolution.ThetaPhi(sol3DOF,ax2,ax2); xlabel('Time (s)');
+allowableAngs=PlotSolution.GetAllowableAngles(sol3DOF);
+plot(sol3DOF.t,allowableAngs,'k:','LineWidth',.5);
+ylabel('Plume Angle (deg)'); legend('Azimuth Angle','Polar Angle','Minimum Polar Angle'); 
+legend('Location','southwest'); title('');
+
+ax3 = subplot(2,2,4); grid on; hold on; 
+e=PlotSolution.GetEulerAngles(sol6DOF);
+PlotSolution.TimeSeriesThrottleOnOff(e,sol6DOF,{'Yaw','Pitch','Roll'},ax3);
+xlabel('Time (s)');ylabel('Euler Angle (deg)')
+
+ax4 = subplot(2,2,1); grid on; hold on; 
+sol3D_km = sol3DOF; sol3D_km.x = sol3DOF.x*1e3; xlabel('Radial (m)')
+ylabel('Along Track (m)')
+PlotSolution.addTrajectory(sol3D_km,ax4);
+ax4.View = [90,-90];
+s = PlotSphereConstraint(ax4,sol3DOF.problemParameters.constraint.targetRadius*1e3,[0;0;0]);
+set(s,'EdgeAlpha',0);
+saveFigFcn(hf2,saveDir);
+
+%% Figure Plot trajectory showing rotations and engine plumes 
+hf3 = figure('Name','TrajRotations');
+customPlot.cubeOpacity=0;
+customPlot.coneHeightFactor=1.3;
+customPlot.coneOffOpacity=0.05;
+customPlot.cubeLengthScale=.6;
+customPlot.handVis='on';
+ax = gca; grid on; hold on;
+sol = solCG6_R35_TorqueRho(end); 
+plotTimes = [0,7,16,25,39,48];
+plot3(sol.x(:,1)*1e3,sol.x(:,2)*1e3,sol.x(:,3)*1e3,'b--','LineWidth',1,'DisplayName','Trajectory')
+plot3(sol.x(1,1)*1e3,sol.x(1,2)*1e3,sol.x(1,3)*1e3,'b.','MarkerSize',10,'DisplayName','start')
+plot3(sol.x(end,1)*1e3,sol.x(end,2)*1e3,sol.x(end,3)*1e3,'b.','MarkerSize',10,'DisplayName','end')
+PlotSolution.OrientationAtTime(sol,plotTimes,ax,customPlot);
+view([-90,90]); legend('hide')
+ylabel('Along Track (m)'); xlabel('Radial (m)')
+saveFigFcn(hf3,saveDir);
+
+%% Plots of rotations, engine plumes and constraint for QUAD chart
+%sol= solCG6_R35_TorqueRho(end);
+sol= freeMRPR32_KRE(end); 
+
+customPlot.arrowSpacing = 1.5;
+customPlot.arrowLength=3;
+hf3Quad1 = figure('Name','TrajRotationsQuadR35'); grid on; hold on;
+plot3(sol.x(:,1)*1e3,sol.x(:,2)*1e3,sol.x(:,3)*1e3,'b--','LineWidth',1.5,'DisplayName','Trajectory');
+PlotSolution.addThrustDirection6DOF(sol,gca,customPlot)
+s = PlotSphereConstraint(gca,sol.problemParameters.constraint.targetRadius*1e3,[0;0;0]);
+axis equal;view([-90,90]); legend('hide')
+customPlot.cubeOpacity=0.0;
+customPlot.coneHeightFactor=1.3;
+customPlot.coneOffOpacity=0.08;
+customPlot.cubeLengthScale=.6;
+customPlot.handVis='off';
+customPlot.showArrows=false;
+plotTimes = [0,16,25,39,48];
+PlotSolution.OrientationAtTime(sol,plotTimes,gca,customPlot);
+plot3(sol.x(1,1)*1e3,sol.x(1,2)*1e3,sol.x(1,3)*1e3,'b.','MarkerSize',10,'DisplayName','start','HandleVisibility','off')
+plot3(sol.x(end,1)*1e3,sol.x(end,2)*1e3,sol.x(end,3)*1e3,'b.','MarkerSize',10,'DisplayName','end','HandleVisibility','off')
+view([-90,90]); %legend('hide')
+ylabel('Along Track (m)'); xlabel('Radial (m)')
+
+%% Quad chart 2 - Multiple traj on same fig
+hf3Quad2 = figure('Name','TrajRotationsQuadR35'); grid on; hold on; ax=gca;
+sols2Plot = [seedA_RadKER_34(end);seedB_RadKER_34(end);seedC_RadKER(end);seedD_RadKER(end);
+    seedE_RadKER(end);seedF_RadKER(end);seedG_RadKER(end);seedH_RadKER(end);]';
+customPlot.arrowSpacing = 1;
+customPlot.arrowLength=1;handVis='on';
+for sol = sols2Plot
+    plot3(sol.x(:,1)*1e3,sol.x(:,2)*1e3,sol.x(:,3)*1e3,'b--','LineWidth',1.5,'DisplayName','Trajectories','HandleVisibility',handVis);
+    plot3(sol.x(1,1)*1e3,sol.x(1,2)*1e3,sol.x(1,3)*1e3,'b.','MarkerSize',10,'DisplayName','start','HandleVisibility','off')
+    plot3(sol.x(end,1)*1e3,sol.x(end,2)*1e3,sol.x(end,3)*1e3,'b.','MarkerSize',10,'DisplayName','end','HandleVisibility','off')
+    if strcmp(handVis,'on'),handVis='off';end
+
+    customPlot.enginesToPlot = 5;
+    customPlot.arrowSpacing = 1;
+    customPlot.arrowLength=3;
+    PlotSolution.addThrustDirection6DOF(sol,gca,customPlot)
     
-    solutionCG_AlignedUnconstrained = Solve6DOFPointingConstrainedControlProblem(problemParameters,solverParameters);
-    % unconstrainedInitialRho = PlotSolution.summary(solution);
+    customPlot.enginesToPlot = [1,2,3,4,6];
+    customPlot.arrowLength=.3;
+    customPlot.arrowSpacing = 3;
+    %PlotSolution.addThrustDirection6DOF(sol,gca,customPlot)
+    customPlot.coneOffOpacity=0.04;
+
+    %PlotSolution.OrientationAtTime(sol,30,gca,customPlot);
+end
+s = PlotSphereConstraint(gca,sol.problemParameters.constraint.targetRadius*1e3,[0;0;0]);
+s.LineStyle=':';
+axis equal; xlim([-4,4]);zlim([-4,4]); ylim([-4,10.5])
+
+customPlot.cubeOpacity=0.0;
+customPlot.coneHeightFactor=1.3;
+customPlot.coneOffOpacity=01;
+customPlot.cubeLengthScale=.7;
+customPlot.handVis='on';
+customPlot.showArrows=false;
+PlotSolution.OrientationAtTime(sol,0,ax,customPlot);
+
+customPlot.cubeLengthScale=.7;
+customPlot.coneOffOpacity=0;
+customPlot.handVis='off';
+for jj = [1,3,6,5,7,8]
+    sol=sols2Plot(jj);
+    PlotSolution.OrientationAtTime(sol,32,ax,customPlot);
+end
+ax.View=[207.8128   10.9537];ylabel('Along Track (m)'); xlabel('Radial (m)')
+zlabel('Out of Plane (m)'); title('Thruster Constrained Optimal Proximity Operations in LEO');
+saveFigFcn(hf3Quad2,saveDir)
+
+%% Mass consumption figures
+hf4 = figure('Name','MassConsumptionAll'); grid on; hold on; 
+PlotSolution.MassConsumption(solutionCG_Aligned_Constrained2SmallEps_RhoSweep(end),gca,'Constrained, Without Attitude Control, Fixed Final Orientation')
+PlotSolution.MassConsumption(solCG6_R2_TorqueRho(end),gca,'Constrained, With Attitude Control, Fixed Final Orientation')
+PlotSolution.MassConsumption(sol6DOF,gca,'Constrained, With Attitude Control, Free Final Orientation')
+%PlotSolution.MassConsumption(solutionCG_AlignedUnconstrainedrhoSweep(end),gca,'Unconstrained, Without Attitude Control, Fixed Final Orientation')
+PlotSolution.MassConsumption(sol3DOF(end),gca,'Constrained 3DOF, (No Attitude Rate Limits)')
+PlotSolution.MassConsumption(rhoKappaSweepCG_Aligned_ControlTorque(end),gca,'Unconstrained, With Attitude Control, Fixed Final Orientation')
+xlabel('Time (s)'); title('');
+saveFigFcn(hf4,saveDir);
+
+hf4a = figure('Name','MassConsumptionRad'); grid on; hold on; 
+sols2plot = [rhoKappaSweepCG_Aligned_ControlTorque(end); 
+    solCG6_R1_TorqueRho(end);
+    solCG6_R2_TorqueRho(end);
+    solCG6_R3_TorqueRho(end);
+    solCG6_R35_TorqueRho(end);
+    solCG6_R38_TorqueKRadERSmallR(end);];
+Cols = GetColors(numel(sols2plot));
+for ii = 1:numel(sols2plot)
+    sol = sols2plot(ii);
+    if ii==1
+        lab = 'Unconstrained';
+    else
+        lab=['Constraint Radius = ',num2str(sol.problemParameters.constraint.targetRadius*1e3),'m'];
+    end
+    PlotSolution.MassConsumption(sol(end),gca,lab,Cols(ii,:))
 end 
-solutionCG_AlignedUnconstrained = NEW_Solve6DOFPointingConstrainedControlProblem(problemParameters,solverParameters);
+xlabel('Time (s)'); title('');
+saveFigFcn(hf4a,saveDir);
 
-UnconstrainedShortTimeRhoSweep = SweepSolutions(solutionCG_AlignedUnconstrained,'rho',1e-4,true);
-solutionCG_AlignedUnconstrainedSmallRho = RerunSolution(UnconstrainedShortTimeRhoSweep(end));
-PlotSolution.ThrustProfileAllEngines(solutionCG_AlignedUnconstrainedSmallRho)
-PlotSolution.SixDOF_Traj(solutionCG_AlignedUnconstrainedSmallRho);
-PlotSolution.InitialOrientation(problemParameters);
-PlotSolution.RotationalSummary(UnconstrainedShortTimeRhoSweep(end));
+%% 6Dof trajectory plot with multiple trajectories 
+hf5=figure('Name','6DOF_Trajectories'); grid on; hold on;
+ax = gca;
+solution = solutionCG_AlignedUnconstrainedrhoSweep(end);
+plot3(0,0,0,'m.','MarkerSize',80,'DisplayName','Target Location')
+PlotSphereConstraint(gca,2,[0;0;0])
+x = [solution.problemParameters.x0(1:6)';solution.problemParameters.xf']*1e3;
+%plot3(x(1,1), x(1,2), x(1,3),'bo','MarkerSize',10,'DisplayName','x_0 Chaser Initial')
+plot3(x(end,1), x(end,2), x(end,3),'ko','MarkerSize',10,'DisplayName','x_f Chaser Final')
+plot3(solution.x(:,1)*1e3,solution.x(:,2)*1e3,solution.x(:,3)*1e3,'LineWidth',2,'DisplayName','Unconstrained Trajectory')
+solution = solutionCG_Constraint2CheaperTorque_Sr_Se(end);
+plot3(solution.x(:,1)*1e3,solution.x(:,2)*1e3,solution.x(:,3)*1e3,'LineWidth',2,'DisplayName','Constrained with Attitude Control')
+solution = solutionCG_Aligned_Constrained2SmallEps_RhoSweep(end);
+plot3(solution.x(:,1)*1e3,solution.x(:,2)*1e3,solution.x(:,3)*1e3,'LineWidth',2,'DisplayName','Constrained without Attitude Control')
+customPlot.cubeOpacity=0.05;
+customPlot.coneHeightFactor=1.25;
+customPlot.coneOffOpacity=0.2;
+customPlot.cubeLengthScale=1;
+customPlot.cubeLengthScale=.8;
+customPlot.handVis = 'off'; 
 
-%% Unconstrained attitude only 60 degree rotation with control torques
-[problemParameters, solverParameters] = ConstrainedApproachTestCondition(2100,engineType,THRUSTER_CONFIGURATION.RCS_12);
-solutionAttitudeOnly = Solve6DOFPointingConstrainedControlProblem(problemParameters,solverParameters);
-solutionAttitudeOnlyRhoSweep = SweepSolutions(solutionAttitudeOnly,'rho',1e-4,true);
+PlotSolution.OrientationAtTime(solutionCG_AlignedUnconstrainedrhoSweep(end),0,ax,customPlot)
+PlotSolution.OrientationAtTime(solution,[31],ax,customPlot)
+PlotSolution.OrientationAtTime(solutionCG_Constraint2CheaperTorque_Sr_Se(end),[33],ax,customPlot)
+xlim([-3,3]); ylim([-1,12])
+view([-90,90]); 
+ylabel('Along Track (m)'); xlabel('Radial (m)')
+saveFigFcn(hf5,saveDir);
 
-PlotSolution.ThrustProfileAllEngines(solutionAttitudeOnly)
-PlotSolution.RotationalSummary(solutionAttitudeOnlyRhoSweep(end))
-
-%% Unconstrained, attitude only, 180 degree rotation
-[problemParameters, solverParameters] = ConstrainedApproachTestCondition(2101,engineType,THRUSTER_CONFIGURATION.RCS_12);
-solutionAttitudeOnly = Solve6DOFPointingConstrainedControlProblem(problemParameters,solverParameters);
-solutionAttitudeOnlyRhoSweep = SweepSolutions(solutionAttitudeOnly,'rho',1e-4,true);
-
-PlotSolution.ThrustProfileAllEngines(solutionAttitudeOnlyRhoSweep(end))
-PlotSolution.RotationalSummary(solutionAttitudeOnlyRhoSweep(end))
-
-%% Unconstrained CG aligned but canted thrusters
-[problemParametersUnconstrainedCG_Canted, solverParametersUnconstrainedCG_Canted] = ConstrainedApproachTestCondition(1011,engineType,THRUSTER_CONFIGURATION.CG_ALIGNED_CANTED_8);
-
-solverParametersUnconstrainedCG_Canted.initialCostateGuess = [-0.000089618015403   2.382117256137634   0.000000000000000  -2.076139519736225  57.115489612329533  -0.000000000000000   0.000142936265578  -0.000008931051246  -0.000001093674343 0.000003524540051  -0.000071361039315  -0.000010314917224   0.000008709836245]';
-solutionUnconstrainedCG_Canted = Solve6DOFPointingConstrainedControlProblem(problemParametersUnconstrainedCG_Canted,solverParametersUnconstrainedCG_Canted);
-
-UnconstrainedCG_CantedShortTimeRhoSweep = SweepSolutions(solutionUnconstrainedCG_Canted,'rho',1e-4,true);
-solutionCG_CantedUnconstrainedSmallRho = RerunSolution(UnconstrainedCG_CantedShortTimeRhoSweep(end));
-PlotSolution.ThrustProfileAllEngines(solutionCG_CantedUnconstrainedSmallRho)
-PlotSolution.SixDOF_Traj(solutionCG_CantedUnconstrainedSmallRho);
-PlotSolution.InitialOrientation(problemParametersUnconstrainedCG_Canted);
-
-% Now add a 2m constraint to this, Has no effect because thrusters are
-% canted
-[problemParametersCG_Canted_Constrained, solverParametersCG_Canted_Constrained] = ConstrainedApproachTestCondition(1013,engineType,THRUSTER_CONFIGURATION.CG_ALIGNED_CANTED_8);
-solverParametersCG_Canted_Constrained.initialCostateGuess = solutionUnconstrainedCG_Canted.newCostateGuess;
-problemParametersCG_Canted_Constrained = UpdateSphereCircleRadius(problemParametersCG_Canted_Constrained,2/1000);
-problemParametersCG_Canted_Constrained.constraint.epsilon = .05;
-solutionCG_Canted_Constrained = Solve6DOFPointingConstrainedControlProblem(problemParametersCG_Canted_Constrained,solverParametersCG_Canted_Constrained);
-solutionCG_AlignedSphericalConstraint2_SmallRhoSmallEpsilon = SweepSolutions(solutionCG_Canted_Constrained,'rhoepsilon',1e-4,true);
-
-solutionCG_AlignedSphericalConstraint2_Converged = SweepSolutions(solutionCG_AlignedSphericalConstraint2_SmallRhoSmallEpsilon(end),'rhoepsilon',1e-6,true);
-solutionCG_Canted2mConstraintSmallRhoEpsilon = RerunSolution(solutionCG_AlignedSphericalConstraint2_SmallRhoSmallEpsilon(end));
-for sol = [solutionCG_Canted2mConstraintSmallRhoEpsilon(end), solutionCG_AlignedSphericalConstraint2_Converged]
-    PlotSolution.ThrustProfileAllEngines(sol)
-    PlotSolution.SixDOF_Traj(sol);
-    PlotSolution.PlumeAngleSixDOF(sol)
+%% Plot of trajectories without attitude control 
+hf6 = figure('Name','6DOF_Trajectories_NoAttitudeControl'); grid on; hold on;
+ax = gca;
+sol = solutionCG_AlignedUnconstrainedrhoSweep(end);
+sols2Plot = [solutionCG_Aligned_ConstrainedR05_VerySmallrhoSweep(end),...
+    solutionCG_Aligned_ConstrainedR1_rhoSweep(end),...
+    solutionCG_Aligned_ConstrainedR15_Se_Sr(end),...
+    solutionCG_Aligned_ConstrainedR25_Se_Sr(end),...
+    solutionCG_Aligned_ConstrainedR3_Se_Sr(end)];%...solutionCG_Aligned_ConstrainedR34_Se_Sr(end)
+x = sol.x*1e3;
+plot3(0,0,0,'m.','MarkerSize',20,'DisplayName','Target Location')
+plot3(x(1,1), x(1,2), x(1,3),'bo','MarkerSize',10,'LineWidth',2,'DisplayName','Chaser Initial')
+plot3(x(end,1), x(end,2), x(end,3),'bx','MarkerSize',13,'LineWidth',2,'DisplayName','Chaser Final')
+%sols2Plot = sols2Plot([5:-1:1]);
+C = linspecer(numel(sols2Plot)+1);
+C = GetColors(7);
+jj=1;
+plot3(sol.x(:,1)*1e3,sol.x(:,2)*1e3,sol.x(:,3)*1e3,'Color',C(jj,:),'LineWidth',2,'DisplayName','Unconstrained');
+for sol = sols2Plot
+    jj=jj+1;
+    plot3(sol.x(:,1)*1e3,sol.x(:,2)*1e3,sol.x(:,3)*1e3,'Color',C(jj,:),'LineWidth',2,'DisplayName',['R = ',num2str(sol.problemParameters.constraint.targetRadius*1e3),'m']);
+    ReduceColorOrderIndex(ax);
+    % Plot circle of radius targetRadius
+    if jj==2;
+        p = patch(1e3*sol.problemParameters.constraint.targetRadius*cos(0:0.01:2*pi),1e3*sol.problemParameters.constraint.targetRadius*sin(0:0.01:2*pi),C(jj,:),'FaceAlpha',0,'HandleVisibility','off','LineWidth',1,...
+        'EdgeColor',C(jj,:));
+        r2=1e3*sol.problemParameters.constraint.targetRadius;
+    else
+        r1=r2;
+        r2=1e3*sol.problemParameters.constraint.targetRadius;
+        p = PlotSolution.Annulus(r1,r2,C(jj,:));
+        p.FaceAlpha = 0; %p.LineStyle="none";
+    end
+    H=hatchfill(p,'single',jj*65,15); H.Color = C(jj,:); H.HandleVisibility = 'off';
 end
+jj=jj+1;
+xlabel('Radial (m)'); ylabel('Along Track (m)'); 
+ax.View = [90,90]; axis equal
+xlim([-4,4]); ylim([-4,10.5])
+hf6.Position = [1 1 1015 697];legend('show','Location','east'); 
+saveFigFcn(hf6,saveDir); 
 
-%% 6x CG Aligned with 2m spherical constraint
-[problemParametersCG_6_Constrained, solverParametersCG_6_Constrained] = ConstrainedApproachTestCondition(1013,engineType,THRUSTER_CONFIGURATION.CG_ALIGNED_6);
-solverParametersCG_6_Constrained.initialCostateGuess = solutionCG_AlignedUnconstrained.newCostateGuess;
-problemParametersCG_6_Constrained = UpdateSphereCircleRadius(problemParametersCG_6_Constrained,2/1000);
-problemParametersCG_Canted_Constrained.constraint.epsilon = .5;
-solutionCG_Aligned_Constrained = RerunSolution(solutionCG_Aligned_Constrained); % Run this 4-5 times
-solutionCG_Aligned_Constrained = Solve6DOFPointingConstrainedControlProblem(problemParametersCG_6_Constrained,solverParametersCG_6_Constrained);
-solutionCG_AlignedSphericalConstraint2_SmallRhoSmallEpsilon = SweepSolutions(solutionCG_Aligned_Constrained,'rhoepsilon',1e-4,true);
+%% Animation
+PlotSolution.SixDOF_Traj_Animated(solutionCG_Constraint2CheaperTorque_Sr_Se(end))
 
-for sol = [solutionCG_AlignedSphericalConstraint2_SmallRhoSmallEpsilon(26),solutionCG_AlignedSphericalConstraint2_SmallRhoSmallEpsilon(end)]
-    PlotSolution.ThrustProfileAllEngines(sol)
-    PlotSolution.PlumeAngleSixDOF(sol)
-    PlotSolution.SixDOF_Traj(sol);
+%% Plot of engine 5 constraint for increasing radius target (without control torque)
+hf7 = figure('Name','Engine5Constraint'); grid on; hold on;
+ax = gca;
+sols2Plot2 = [solutionCG_AlignedUnconstrainedrhoSweep(end),sols2Plot];
+for kk = 2:numel(sols2Plot2), radii(kk-1)=sols2Plot2(kk).problemParameters.constraint.targetRadius*1e3; end
+PlotSolution.PlumeAngleSixDOF(sols2Plot2,ax,5);
+legend('Unconstrained',['R = ',num2str(radii(1)),'m'],['R = ',num2str(radii(2)),'m'],['R = ',num2str(radii(3)),'m'],['R = ',num2str(radii(4)),'m'],['R = ',num2str(radii(5)),'m'])
+title('Trajectories without attitude control, Engine 5 plume angle from target')
+saveFigFcn(hf7,saveDir); 
+
+%% Plot of Yaw Angle, angular velocity and torque for increasing Radius
+sols2plot = [rhoKappaSweepCG_Aligned_ControlTorque(end); 
+    solCG6_R1_TorqueRho(end);
+    %solCG6_R15_TorqueRho(end);
+    solCG6_R2_TorqueRho(end);
+    %solCG6_R25_TorqueRho(end);
+    solCG6_R3_TorqueRho(end);
+    solCG6_R35_TorqueRho(end); 
+    %solCG6_R35_TorqueKER(end);
+    %solCG6_R38_TorqueKER(end)
+    ];
+hf8 = figure('Name','RotationComparison');
+C = GetColors(numel(sols2plot));
+
+for ii = 1:numel(sols2plot)
+    sol = sols2plot(ii); 
+    if ii==1, lab = 'Unconstrained'; else
+        radius = sol.problemParameters.constraint.targetRadius*1e3;
+        lab = ['R = ',num2str(radius),'m']; 
+    end
+    ax1 = subplot(3,1,1); grid on; hold on;
+    e=PlotSolution.GetEulerAngles(sol);xlabel('Time (s)');ylabel('Yaw (deg)')
+    PlotSolution.TimeSeriesThrottleOnOff(e(1,:),sol,{lab},ax1,C(ii,:));
+    subplot(3,1,2); grid on; hold on;
+    plot(sol.t,180/pi.*sol.x(:,13),'Color',C(ii,:),'LineWidth',2);xlabel('Time (s)'); ylabel('Angular velocity (deg/s)')
+    subplot(3,1,3); grid on; hold on;
+    plot(sol.t,sol.torqueInertialFrame(3,:),'Color',C(ii,:),'LineWidth',2); xlabel('Time (s)'); ylabel('Torque (Nm)')
 end
-PlotSolution.ConvergedCostateTrace(solutionCG_AlignedSphericalConstraint2_SmallRhoSmallEpsilon)
+axes(ax1); ylim([-5,45]); saveFigFcn(hf8,saveDir); 
+saveFigSeparateAxes(hf8,saveDir); 
 
-%% 6x CG aligned with control Torque 
-[problemParametersControlTorque, solverParametersControlTorque] = ConstrainedApproachTestCondition(2011,engineType,THRUSTER_CONFIGURATION.CG_ALIGNED_6);
-solverParametersControlTorque.initialCostateGuess = solutionCG_AlignedUnconstrained.newCostateGuess;
-solutionCG_Aligned_ControlTorque = Solve6DOFPointingConstrainedControlProblem(problemParametersControlTorque,solverParametersControlTorque);
+%% Plot costate continuity for a single result
+sol = solCG6_R3_TorqueRho(end);
+hf9 = figure('Name','Costates_R3'); 
+stateLabels = PlotSolution.GetStateLabels(sol);
+subplot(2,2,1); for ii = [13+[1,2,4,5]], plot(sol.t,sol.x(:,ii),"DisplayName",stateLabels{ii},'LineWidth',2); hold on; grid on; end, legend('show','Location','best'); xlabel('Time (s)')
+subplot(2,2,3);for ii = [13+[3,6]], plot(sol.t,sol.x(:,ii),"DisplayName",stateLabels{ii},'LineWidth',2); hold on; grid on; end, legend('show','Location','northwest'); xlabel('Time (s)')
+subplot(2,2,4);for ii = [13+[8,9,11,12]], plot(sol.t,sol.x(:,ii),"DisplayName",stateLabels{ii},'LineWidth',2); hold on; grid on; end, legend('show','Location','best'); xlabel('Time (s)')
+subplot(2,2,2);for ii = [13+[7,10,13]], plot(sol.t,sol.x(:,ii),"DisplayName",stateLabels{ii},'LineWidth',2); hold on; grid on; end, legend('show','Location','best'); xlabel('Time (s)')
+MagInset(hf9,subplot(2,2,3), [34,34.5,1.2e-15,2e-15],[22,47,-12e-14,-6e-14],{'SE','NE'});
+saveFigFcn(hf9,saveDir); 
+saveFigSeparateAxes(hf9,saveDir); 
 
-sol =solutionCG_Aligned_ControlTorque; PlotSolution.ThrustProfileAllEngines(sol); PlotSolution.SixDOF_Traj(sol);PlotSolution.RotationalSummary(sol)
-rhoSweepCG_Aligned_ControlTorque = SweepSolutions(sol,'rho',1e-4,true);
+%% Print converged costates
+sols2PrintNoControl = [solutionCG_AlignedUnconstrainedrhoSweep(end),...
+    solutionCG_Aligned_ConstrainedR1_rhoSweep(end),...
+    solutionCG_Aligned_ConstrainedR25_VE_Sr(end),...
+    solutionCG_Aligned_ConstrainedR3_Se_Sr(end)];%...solutionCG_Aligned_ConstrainedR34_Se_Sr(end)
 
-sol =rhoSweepCG_Aligned_ControlTorque(end); PlotSolution.ThrustProfileAllEngines(sol); PlotSolution.SixDOF_Traj(sol);PlotSolution.RotationalSummary(sol)
+PlotSolution.PrintConvergedCostates(sols2PrintNoControl);
 
-%% 6x CG aligned with and 2m spherical constraint AND control torque
-[problemParametersCG_6_ConstrainedControlTorque, solverParametersCG_6_ConstrainedControlTorque] = ConstrainedApproachTestCondition(2013,engineType,THRUSTER_CONFIGURATION.CG_ALIGNED_6);
-solverParametersCG_6_ConstrainedControlTorque.initialCostateGuess = solutionCG_Aligned_Constrained.newCostateGuess;
-problemParametersCG_6_ConstrainedControlTorque = UpdateSphereCircleRadius(problemParametersCG_6_ConstrainedControlTorque,2/1000);
-problemParametersCG_6_ConstrainedControlTorque.constraint.epsilon = .1;
-solutionCG_Aligned_ConstrainedControlTorque = Solve6DOFPointingConstrainedControlProblem(problemParametersCG_6_ConstrainedControlTorque,solverParametersCG_6_ConstrainedControlTorque);
-solutionCG_AlignedSphericalConstraintControlTorque2_SmallRhoSmallEpsilon = SweepSolutions(solutionCG_Aligned_ConstrainedControlTorque,'rhoepsilon',1e-4,true);
+sols2Print = [rhoKappaSweepCG_Aligned_ControlTorque(end); 
+    solCG6_R1_TorqueRho(end);
+    solCG6_R2_TorqueRho(end);
+    solCG6_R3_TorqueRho(end)];
 
-sol = solutionCG_AlignedSphericalConstraintControlTorque2_SmallRhoSmallEpsilon(end);
-PlotSolution.ThrustProfileAllEngines(sol); PlotSolution.SixDOF_Traj(sol);PlotSolution.RotationalSummary(sol)
-PlotSolution.ConvergedCostateTrace(solutionCG_AlignedSphericalConstraintControlTorque2_SmallRhoSmallEpsilon);
-PlotSolution.CostBreakdown(sol);
+PlotSolution.ThrustProfileAllEngines(solCG6_R3_TorqueRho(end))
+PlotSolution.ConvergedCostateTrace(solCG6_R3_TorqueRho)
 
-%% 6x CG aligned with control torque and 2m spherical constraint, free final MRP
-[problemParametersCG_6_ConstrainedFreeMRP, solverParametersCG_6_ConstrainedFreeMRP] = ConstrainedApproachTestCondition(2013,engineType,THRUSTER_CONFIGURATION.CG_ALIGNED_6);
-solverParametersCG_6_ConstrainedFreeMRP.initialCostateGuess = solutionCG_AlignedSphericalConstraintControlTorque2_SmallRhoSmallEpsilon(1).newCostateGuess;
-problemParametersCG_6_ConstrainedFreeMRP = UpdateSphereCircleRadius(problemParametersCG_6_ConstrainedFreeMRP,2/1000);
-problemParametersCG_6_ConstrainedControlTorque.constraint.epsilon = .1;
-problemParametersCG_6_ConstrainedFreeMRP.dynamics.finalAttitudeFree = true;
-% solverParametersCG_6_ConstrainedFreeMRP.fSolveOptions.MaxIterations = 300;
-[problemParametersCG_6_ConstrainedFreeMRP, inertiaNewFinal] = UpdateInertia(problemParametersCG_6_ConstrainedFreeMRP,100);
-
-solutionCG_Aligned_ConstrainedFreeMRP_LargeInertia = Solve6DOFPointingConstrainedControlProblem(problemParametersCG_6_ConstrainedFreeMRP,solverParametersCG_6_ConstrainedFreeMRP);
-solutionCG_Aligned_ConstrainedFreeMRP_LargeInertia = RerunSolution(solutionCG_Aligned_ConstrainedFreeMRP_LargeInertia);
-solutionCG_Aligned_ConstrainedFreeMRP_InertiaSweep = SweepSolutions(solutionCG_Aligned_ConstrainedFreeMRP_LargeInertia,'Inertia',...
-    linspace(inertiaNewFinal(1),inertiaNewFinal(2),50),true);
-
-sol = solutionCG_Aligned_ConstrainedFreeMRP_InertiaSweep(end); PlotSolution.ThrustProfileAllEngines(sol); PlotSolution.SixDOF_Traj(sol);PlotSolution.RotationalSummary(sol)
-
-solutionCG_Aligned_Constraint2_FreeMRP_SmallRhoSmallEpsilon = SweepSolutions(solutionCG_Aligned_ConstrainedFreeMRP_InertiaSweep(end),'rhoepsilon',1e-4,true);
-% Steps are huge for the above problem. Is this due to epsilon or rho? 
-% Try rho sweep alone to see what the norms of the steps are
-SweepSolutions(solutionCG_Aligned_ConstrainedFreeMRP_InertiaSweep(end),'rho',1e-4,true);
-% Still huge steps.
-SweepSolutions(solutionCG_Aligned_ConstrainedFreeMRP_InertiaSweep(end),'epsilon',1e-4,true);
-% Still huge steps.
-
-sol = solutionCG_Aligned_Constraint2_FreeMRP_SmallRhoSmallEpsilon(end); PlotSolution.ThrustProfileAllEngines(sol); PlotSolution.SixDOF_Traj(sol);PlotSolution.RotationalSummary(sol)
-
-%% Try 45 degree rotation about z axis during rendezvous.
-% First without constraint
-[problemParametersControlTorqueRotation, solverParametersControlTorqueRotation] = ConstrainedApproachTestCondition(2011,engineType,THRUSTER_CONFIGURATION.CG_ALIGNED_6);
-problemParametersControlTorqueRotation.pf = [0;0;1]*tan(45*pi/180/4); % = n*tan(theta/4), where n is unit vector, theta is angle of rotation. 
-solverParametersControlTorqueRotation.initialCostateGuess = solutionCG_AlignedUnconstrained.newCostateGuess;
-solutionCG_Aligned_ControlTorqueRotation = Solve6DOFPointingConstrainedControlProblem(problemParametersControlTorqueRotation,solverParametersControlTorqueRotation);
-
-sol =solutionCG_Aligned_ControlTorqueRotation; PlotSolution.ThrustProfileAllEngines(sol); PlotSolution.SixDOF_Traj(sol);PlotSolution.RotationalSummary(sol)
-rhoSweepCG_Aligned_ControlTorque = SweepSolutions(sol,'rho',1e-4,true);
-
-sol =rhoSweepCG_Aligned_ControlTorque(end); PlotSolution.ThrustProfileAllEngines(sol); PlotSolution.RotationalSummary(sol)
-PlotSolution.SixDOF_Traj(sol); PlotSolution.PlotOrientationChaserRelativeToTranslationalFrame(sol.x(end,8:10),sol.x(end,1:3)*1e3,sol.t(end),sol.problemParameters,gca)
-
-% Then with constraint. FIX FSOLVE STEP SIZE 
-[problemParametersControlTorqueRotationConstrained, solverParametersControlTorqueRotationConstrained] = ConstrainedApproachTestCondition(2013,engineType,THRUSTER_CONFIGURATION.CG_ALIGNED_6);
-solverParametersControlTorqueRotationConstrained.initialCostateGuess = solutionCG_Aligned_ControlTorqueRotation.newCostateGuess;
-problemParametersControlTorqueRotationConstrained = UpdateSphereCircleRadius(problemParametersControlTorqueRotationConstrained,2/1000);
-problemParametersControlTorqueRotationConstrained.pf = [0;0;1]*tan(45*pi/180/4); % = n*tan(theta/4), where n is unit vector, theta is angle of rotation. 
-problemParametersControlTorqueRotationConstrained.constraint.epsilon = .1;
-
-solutionCG_Aligned_ControlTorqueRotationConstrained = Solve6DOFPointingConstrainedControlProblem(problemParametersControlTorqueRotationConstrained,solverParametersControlTorqueRotationConstrained);
-
-
-%% Above but experiment with larger torques (i.e. smaller cost multipliers)
-torqueValues = linspace(problemParametersCG_6_ConstrainedFreeMRP.dynamics.torqueCostMultiplier,1e-4,20);
-solutionCG_Aligned_ConstrainedFreeMRP_InertiaSweep(end).fSolveOptions.MaxIterations = 30;
-
-sweep_CGAligned_Constraint2_FreeMRP_LowAttitudeCost = SweepSolutions(solutionCG_Aligned_ConstrainedFreeMRP_InertiaSweep(end),...
-    'ControlTorqueCost', torqueValues,true);
-solutionCG_Aligned_Constraint2_FreeMRP_LowAttitudeCost_SmallRhoSmallEpsilon = SweepSolutions(sweep_CGAligned_Constraint2_FreeMRP_LowAttitudeCost(end), ...
-    'rhoepsilon',1e-4,true);            
-
-
-%% 6x CG aligned with control Torque, Ruthvik's transfer, 100, transfer, slightly higher LEO orbit, smaller thrusters
-[problemParametersRuthvik, solverParametersRuthvik] = ConstrainedApproachTestCondition(2200,5,THRUSTER_CONFIGURATION.CG_ALIGNED_6);
-solutionRuthvik = Solve6DOFPointingConstrainedControlProblem(problemParametersRuthvik,solverParametersRuthvik);
-solutionRuthvik = RerunSolution(solutionRuthvik);
-
-finalI_Ruthvik = problemParametersRuthvik.dynamics.inertia(2,2);
-initialI_Ruthvik = finalI_Ruthvik*100;
-problemParametersRuthvik.dynamics.inertia = problemParametersRuthvik.dynamics.inertia*1e2;
-problemParametersRuthvik.dynamics.inertiaInverse = problemParametersRuthvik.dynamics.inertiaInverse/1e2;
-solverParametersRuthvik.rho = .5;
-solverParametersRuthvik.initialCostateGuess(11:13) =0; 
-solutionRuthvikLargeRho = Solve6DOFPointingConstrainedControlProblem(problemParametersRuthvik,solverParametersRuthvik);
-
-outOfPlaneRCS_12_InertiaSweep = SweepSolutions(solutionRuthvikLargeRho,'Inertia',linspace(initialI_Ruthvik,finalI_Ruthvik*2,20),true);
-solRuthvikRhoSweep = SweepSolutions(outOfPlaneRCS_12_InertiaSweep(15),'rho',.1,true);
-outOfPlaneRCS_12_InertiaSweep = SweepSolutions(solRuthvikRhoSweep(end),'Inertia',linspace(solRuthvikRhoSweep(end).problemParameters.dynamics.inertia(2,2),finalI_Ruthvik*5,20),true);
-solRuthvikRhoSweepinertiaX5 = SweepSolutions(outOfPlaneRCS_12_InertiaSweep(end),'rho',1e-4,true);
-
-k = solRuthvikRhoSweepinertiaX5(end);
-PlotSolution.SixDOF_Traj(k)
-PlotSolution.ThrustProfileAllEngines(k)
-PlotSolution.RotationalSummary(k)
-
-%% Unconstrained RCS_12 with 180 degree rotation and out of plane maneuvre
-% Try inertia sweep
-[problemParametersRCS12_UnconsOutOfPlane, solverParametersRCS12_UnconsOutOfPlane] = ConstrainedApproachTestCondition(1011,engineType,THRUSTER_CONFIGURATION.RCS_12);
-finalI = problemParametersRCS12_UnconsOutOfPlane.dynamics.inertia(2,2);
-initialI = finalI*100;
-problemParametersRCS12_UnconsOutOfPlane.dynamics.inertia = problemParametersRCS12_UnconsOutOfPlane.dynamics.inertia*1e2;
-problemParametersRCS12_UnconsOutOfPlane.dynamics.inertiaInverse = problemParametersRCS12_UnconsOutOfPlane.dynamics.inertiaInverse/1e2;
-problemParametersRCS12_UnconsOutOfPlane.xf(3) = 0.004;
-solverParametersRCS12_UnconsOutOfPlane.initialCostateGuess = solutionCG_AlignedUnconstrained.newCostateGuess;
-
-seedOutOfPlane = Solve6DOFPointingConstrainedControlProblem(problemParametersRCS12_UnconsOutOfPlane,solverParametersRCS12_UnconsOutOfPlane);
-solverParametersRCS12_UnconsOutOfPlane.initialCostateGuess = seedOutOfPlane.newCostateGuess;
-
-outOfPlaneRCS_12_InertiaSweep = SweepSolutions(seedOutOfPlane,'Inertia',linspace(initialI,finalI*2,20),true);
-outOfPlaneRCS_12_rhoSweepDoubleInertia = SweepSolutions(outOfPlaneRCS_12_InertiaSweep(end),'rho',1e-4,true);
-solverParameters.fSolveOptions.maxIter = 30;
-
-%% Unconstrained RCS_12 with no attitude rotation
-[problemParametersRCS12_Uncons, solverParametersRCS12_Uncons] = ConstrainedApproachTestCondition(1011,engineType,THRUSTER_CONFIGURATION.CG_6_RCS_12);
-problemParametersRCS12_Uncons.dynamics.maxThrust(7:18) = 0;
-% try to use initial costate guess from RCS_6 to guess this sol. 
-solverParametersRCS12_Uncons.initialCostateGuess = solutionCG_AlignedUnconstrained.newCostateGuess;
-seed = Solve6DOFPointingConstrainedControlProblem(problemParametersRCS12_Uncons,solverParametersRCS12_Uncons);
-
-thrusterConfigSweep = SweepSolutions(seed,'ThrusterConfig',linspace(0,problemParametersRCS12_Uncons.dynamics.maxThrust(1),100),true);
-PlotSolution.SixDOF_Traj(thrusterConfigSweep(end))
-PlotSolution.SwitchFunctionAnalysisAllEngines(thrusterConfigSweep(end));
-PlotSolution.ThrustProfileAllEngines(thrusterConfigSweep(end))
-PlotSolution.RotationalSummary(thrusterConfigSweep(end))
-PlotSolution.ConvergedCostateTrace(thrusterConfigSweep)
-
-% Try inertia sweep
-[problemParametersRCS12_Uncons2, solverParametersRCS12_Uncons2] = ConstrainedApproachTestCondition(1011,engineType,THRUSTER_CONFIGURATION.RCS_12);
-finalI = problemParametersRCS12_Uncons2.dynamics.inertia(2,2);
-initialI = finalI*1000;
-problemParametersRCS12_Uncons2.dynamics.inertia = problemParametersRCS12_Uncons2.dynamics.inertia*1e3;
-problemParametersRCS12_Uncons2.dynamics.inertiaInverse = problemParametersRCS12_Uncons2.dynamics.inertiaInverse/1e3;
-
-%% TRY THIS AGAIN AFTER MODIFYING ANDSCSLING THE COST. IF IT STILL DOESNT WORK
-%% SOLVE THE PROBLEM WITH REACTION WHEELS
-% 2. Debug what is happening as rho reduces, some kind of bug (for high
-% inertia). Also there is some kind of limit (reachability for lower
-% inertias?) Or is it just that a tiny thrust causes a large rotation
-% angle. Is it reasonable to assume that fine attitude control (<1deg) is only
-% achievable with reaction wheels? If so, scale the final state error for
-% the MRP terms, This will likely aid in convergence significantly.
-% 3. Change to reaction wheel formulation 
-
-seed2 = Solve6DOFPointingConstrainedControlProblem(problemParametersRCS12_Uncons2,solverParametersRCS12_Uncons2);
-PlotSolution.InitialOrientation(seed2);
-PlotSolution.SixDOF_Traj(seed2)
-PlotSolution.ThrustProfileAllEngines(seed2)
-PlotSolution.RotationalSummary(seed2)
-
-UnconstrainedRCS_12_InertiaSweep = SweepSolutions(seed2,'Inertia',linspace(initialI,finalI),true);
-load("matlab.mat")
-k = UnconstrainedRCS_12_InertiaSweep(end); k = RerunSolution(k);
-UnconstrainedRCS_12_InertiaSweep2 = SweepSolutions(k, 'Inertia',linspace(k.problemParameters.dynamics.inertia(2,2),finalI,20),true);
-PlotSolution.SixDOF_Traj(k)
-PlotSolution.ThrustProfileAllEngines(k)
-PlotSolution.RotationalSummary(k)
-
-ScaledErrorTermsRhoSweep_SmallInertia = SweepSolutions(k,'rho',1e-2,true);
-k = RerunSolution(ScaledErrorTermsRhoSweep_SmallInertia(end));
-ScaledErrorTermsRhoSweepSmaller_SmallInertia = SweepSolutions(k,'rho',1e-4,true);
-PlotSolution.ThrustProfileAllEngines(UnconstrainedRCS_12_TripleInertiaRhoSweep(end))
-
-UnconstrainedRCS_12_SmallRhoDoubleInertiaSweep = SweepSolutions(UnconstrainedRCS_12_TripleInertiaRhoSweep(end), 'Inertia',...
-    linspace(UnconstrainedRCS_12_TripleInertiaRhoSweep(end).problemParameters.dynamics.inertia(2,2),2*finalI,40),true);
-
-PlotSolution.ThrustProfileAllEngines(UnconstrainedRCS_12_SmallRhoDoubleInertiaSweep(end))
-UnconstrainedRCS_12_FinalRhoDoubleInertiaSweep = SweepSolutions(UnconstrainedRCS_12_SmallRhoDoubleInertiaSweep(end),'rho',1e-4,true);
-
-
-UnconstrainedRCS_12_TripleInertiaRhoSweep_3 = SweepSolutions(UnconstrainedRCS_12_SmallRhoDoubleInertiaSweep(end),'rho',1e-3,true);
-
-
-
-UnconstrainedRCS_12_SmallRhoDoubleInertiaSweep2 = SweepSolutions(k, 'Inertia',...
-    linspace(UnconstrainedRCS_12_SmallRhoDoubleInertiaSweep(end).problemParameters.dynamics.inertia(2,2),2*finalI,20),true);
-UnconstrainedRCS_12_DoubleInertiaRhoSweep = SweepSolutions(UnconstrainedRCS_12_SmallRhoDoubleInertiaSweep2(end),'rho',1e-6);
-UnconstrainedRCS_12_SmallRhoDoubleInertiaSweep3 = SweepSolutions(k, 'Inertia',...
-    linspace(UnconstrainedRCS_12_SmallRhoDoubleInertiaSweep2(end).problemParameters.dynamics.inertia(2,2),finalI,20),true);
-[problemParametersRCS12_Uncons2, solverParametersRCS12_Uncons2] = ConstrainedApproachTestCondition(1011,engineType,THRUSTER_CONFIGURATION.RCS_12);
-solverParametersRCS12_Uncons2.initialCostateGuess = UnconstrainedRCS_12_InertiaSweep(end-1).newCostateGuess;
-seed3 = Solve6DOFPointingConstrainedControlProblem(problemParametersRCS12_Uncons2,solverParametersRCS12_Uncons2);
-
-
-solverParametersRCS12_Uncons2.initialCostateGuess = thrusterConfigSweep(end).newCostateGuess;
-solverParametersRCS12_Uncons2.initialCostateGuess = [rand(3,1)/1e3;rand(3,1)*10;rand(7,1)*1e-4];
-solverParametersRCS12_Uncons2.initialCostateGuess(4:6) = lv;
-seed2 = Solve6DOFPointingConstrainedControlProblem(problemParametersRCS12_Uncons2,solverParametersRCS12_Uncons2);
-
-UnconstrainedRCS_12_RhoSweep = SweepSolutions(thrusterConfigSweep(end),'rho',1e-4,true);
-
-solverParametersRCS12_Uncons.initialCostateGuess = seed.newCostateGuess;
-while norm(seed1.finalStateError) > 5
-    solverParametersRCS12_Uncons.initialCostateGuess(11:13) = lw;
-    seed1 = Solve6DOFPointingConstrainedControlProblem(problemParametersRCS12_Uncons,solverParametersRCS12_Uncons);
+for ii=2:4
+    sol = sols2Print(ii);
+    k = SweepSolutions(sol, ...
+        'epsilon',1e-2,true);
+    soleps(ii) = k(end);
+    ii=ii+1;
 end
+soleps(1)=sols2Print(1);
+PlotSolution.PrintConvergedCostates(soleps);
 
-lw = seed.newCostateGuess(11:13);
-lw= seed.newCostateGuess([13,11,12]);
-lw= seed.newCostateGuess([13,12,11]);
-lw= seed.newCostateGuess([12,13,11]);
-lw= seed.newCostateGuess([12,11,13]);
-lw= seed.newCostateGuess([11,13,12]);
-for ii = 1:12
-    lv = seed.newCostateGuess(4:6);
-    u = problemParametersRCS12_Uncons.dynamics.thrustDirectionBody(:,ii);
-    rv = cross(problemParametersRCS12_Uncons.dynamics.engineLocationBody(:,ii),u);
-    ang = acos(dot(lv,u)/norm(lv))*180/pi;
-    ang2 = acos(dot(lw,rv)/norm(rv)/norm(lw))*180/pi;
-    fprintf(['Engine %d \t lambda_v %3.0f\tlambda_w %3.0f,\n'],ii,ang,ang2)
+%% Torque switch function plot 
+% Plot with kappa sweep
+hf12 = figure('Name','KappaSweep');
+N = numel(solCG6_R3_TorqueKappa);
+numTraj = min(5,N); 
+solsToPlot = round(linspace(1,N,numTraj));
+[xVals, xLab, symb,sweepType] = PlotSolution.DetectSweep(solCG6_R3_TorqueKappa(solsToPlot));
+Cols = GetColors(numTraj);
+for ii = 1:numTraj
+    idx = solsToPlot(ii);
+    solution = solCG6_R3_TorqueKappa(idx);            
+    subplot(1,3,1); grid on; hold on;xlabel('Radial (m)'); ylabel('Along Track (m)'); 
+    C = Cols(ii,:);
+    plot3(solution.x(:,1)*1e3, solution.x(:,2)*1e3, solution.x(:,3)*1e3, 'LineWidth',2,'Color',C, 'DisplayName',...
+                        [symb,' = ',num2str(xVals(ii))],'HandleVisibility','off');
+    subplot(1,3,2); grid on; hold on; xlabel('Time (s)'); ylabel('Torque (Nm)')
+    plot(solution.t,solution.torqueInertialFrame(3,:), 'LineWidth',2,'Color',C,'DisplayName',...
+                        [symb,' = ',num2str(xVals(ii))]);legend('show','Location','northwest')
+    subplot(1,3,3); grid on; hold on; xlabel('Time (s)'); ylabel('Switch function (\lambda_{\omega}^TI^{-1})_3');
+    S = PlotSolution.GetTorqueSwitchFunction(solution);
+    plot(solution.t,S(3,:), 'LineWidth',2,'Color',C, 'DisplayName',...
+                        [symb,' = ',num2str(xVals(ii))]);%legend('show','Location','northwest')
 end
+subplot(1,3,1); 
+legend('show','location','northwest')
+plot3(0,10,0,'ko','MarkerSize',10,'LineWidth',2,'DisplayName','Chaser Initial')
+plot3(0,4,0,'kx','MarkerSize',13,'LineWidth',2,'DisplayName','Chaser Final')
+saveFigFcn(hf12,saveDir); 
+saveFigSeparateAxes(hf12,saveDir); 
 
-seed2 = Solve6DOFPointingConstrainedControlProblem(problemParametersRCS12_Uncons,solverParametersRCS12_Uncons);
-PlotSolution.InitialOrientation(k);
-PlotSolution.SixDOF_Traj(seed)
-PlotSolution.SwitchFunctionAnalysisAllEngines(seed2);
-PlotSolution.ThrustProfileAllEngines(seed2)
-PlotSolution.RotationalSummary(seed2)
-
-PlotSolution.SwitchFunctionAnalysisAllEngines(k);
-PlotSolution.ThrustProfileAllEngines(k)
-PlotSolution.RotationalSummary(k)
-
-k=thrusterConfigSweep(27);
-test = SweepSolutions(k,'ThrusterConfig',linspace(k.problemParameters.dynamics.maxThrust(end),5.8e-4,20));
-PlotSolution.ConvergedCostateTrace(newSols)
-
-seedSweep = SweepSolutions(seed,'rho',1e-4);
-PlotSolution.SwitchFunctionAnalysisAllEngines(seed1);
-
-
-%% Unconstrained, translation sweep wit 60 degree rotation - can't get passed Pos = 7.5 with this sweep
-TranslationSweep =SweepSolutions(solutionAttitudeOnly,'FinalY_Position',linspace(0.01,0.004,40),true); % can't get passed Pos = 7.5 with this sweep
-% Sweep the MRP from 30 degrees to zero 
-PlotSolution.ConvergedCostateTrace(TranslationSweep,[10,4])
-
-k = RerunSolution(newSols(3));
-PlotSolution.ConvergedCostateTrace(newSols)
-PlotSolution.ThrustProfileAllEngines(k)
-PlotSolution.RotationalSummary(k)
-PlotSolution.SixDOF_Traj(k);
-
-
-RhoSweepSomeTranslation =SweepSolutions(k,'rho',1e-4,true);
-PlotSolution.ThrustProfileAllEngines(RhoSweepSomeTranslation(end))
-PlotSolution.RotationalSummary(RhoSweepSomeTranslation(end))
-PlotSolution.SixDOF_Traj(RhoSweepSomeTranslation(end));
-PlotSolution.ConvergedCostateTrace(RhoSweepSomeTranslation,[.5,1e-4])
-
-%% 6x CG aligned + a pair of additional thrustuers, what happens here? - experiment with this?
- % experimenting with convergence as number of thrusters increases. expect to find bugs in attitude dynamics
-
-%% RCS_12 configuration - currentlyNotWorking
-[problemParametersRCS12_Uncons, solverParametersRCS12_Uncons] = ConstrainedApproachTestCondition(1011,engineType,THRUSTER_CONFIGURATION.RCS_12);
-% try to use initial costate guess from RCS_6 to guess this sol. 
-solverParametersRCS12_Uncons.initialCostateGuess = [rand(3,1)/1e3;rand(2,1)*10;rand(8,1)*1e-4];
-solutionRCS_12Unconstrained = Solve6DOFPointingConstrainedControlProblem( ...
-    problemParametersRCS12_Uncons,solverParametersRCS12_Uncons);
-PlotSolution.InitialOrientation(problemParametersRCS12_Uncons)
-PlotSolution.(k)
-PlotSolution.ThrustProfileAllEngines(k)
-PlotSolution.RotationalSummary(k)
+%% Rho Sweep 
+hf13 = [figure('Name','RhoSweepA'),figure('Name','RhoSweepB'),figure('Name','RhoSweepC')];
+N = numel(solCG6_R3_TorqueRho);
+numTraj = min(5,N); 
+solsToPlot = round(linspace(1,N,numTraj));
+[xVals, xLab, symb,sweepType] = PlotSolution.DetectSweep(solCG6_R3_TorqueRho(solsToPlot));
+Cols = GetColors(numTraj);
+eng2Plot = [1,2,5]; numEnginesToPlot =3;
+for ii = 1:numTraj
+    C = Cols(ii,:);
+    idx = solsToPlot(ii);
+    solution = solCG6_R3_TorqueRho(idx); 
+    for jj = 1:numEnginesToPlot 
+        figure(hf13(jj)); grid on; hold on;
+        engIdx = eng2Plot(jj);
+        xlabel('Time (s)'); 
+        yyaxis left
+        plot(solution.t,solution.throttle(engIdx,:), '-','Color',C,'LineWidth',2,'Marker','none', 'DisplayName',...
+                        [symb,' = ',num2str(xVals(ii))]);
+        ylabel('Throttle')
+        yyaxis right 
+        semilogy(solution.t,solution.switchFunction(engIdx,:)','--','Color',C,'LineWidth',1,'Marker','none','HandleVisibility','off');
+        ylabel('Switch Function')
+        title(['Engine ',num2str(engIdx)]);
+        if jj==2, legend('show','Location','northeast'); end
+        if ii==numTraj
+            PlotSolution.ShadeConstraintRegion(solution,engIdx,'r',false);
+        end
+        title('');
+    end
+end
+saveFigFcn(hf13,saveDir); 
 
 
-%% Plots 
-figure; PlotSolution.addTrajectory(solutionCG_AlignedUnconstrained,gca)
-figure; grid on; plot(solutionCG_AlignedUnconstrained.t, sum(solutionCG_AlignedUnconstrained.throttle)); hold on; plot(solutionCG_AlignedUnconstrained.t,vecnorm(solutionCG_AlignedUnconstrained.thrustTranslationalFrame))
-figure; plot(solutionCG_AlignedUnconstrained.t,solutionCG_AlignedUnconstrained.throttle); legend('show')
-figure; PlotSolution.PlotInitialOrientation(problemParameters,gca);
-PlotSolution.SwitchFunctionAnalysis(solutionCG_AlignedUnconstrained)
-PlotSolution.SwitchFunctionAnalysisAllEngines(solutionCG_AlignedUnconstrained)
-figure; grid on; hold on; plot(solutionCG_AlignedUnconstrained.t,solutionCG_AlignedUnconstrained.thrustTranslationalFrame)
-        
-
-%% Comparison to 3DOF 
-% comparison to 3dof problem
-engineType = 3; % MONOPROPELLANT
-% engineType = 4; % COLD GAS
-[problemParameters3DOF, solverParameters3DOF] = ConstrainedApproachTestCondition(11,engineType);
-problemParameters3DOF.transferTime = 48;
-solverParameters3DOF.tSpan = [0, problemParameters3DOF.transferTime];
-solverParameters3DOF.initialCostateGuess =  1e-5*[0.002793174850374   0.033568538261829   0.000290206223243  -0.002250790435555   1.337498833488286   0.002331243603019   0.000000148370925  -0.034666484751677   0.009702146188198 0.225697266167110  -0.284304178384577  -0.104361818552909   0.465951552533527]';
-solverParameters3DOF.initialCostateGuess =  [-0.000061909304126   1.683061783958727  -0.000000000000181  -1.449486254206033  40.355191913670460  -0.000000000007311   0.000100989532481]';
-solution3DOF = SolvePointingConstrainedControlProblem(problemParameters3DOF,solverParameters3DOF);
-solution3DOF = RerunSolution(solution3DOF);
+%% Plot of engine 5 constraint for increasing radius target (with control torque)
+hf10 = figure('Name','Engine5ConstraintTorque'); grid on; hold on;
+ax = gca;
+sols2Plot2 = [solutionCG_AlignedUnconstrainedrhoSweep(end),sols2Plot];
+for kk = 2:numel(sols2Plot2), radii(kk-1)=sols2Plot2(kk).problemParameters.constraint.targetRadius*1e3; end
+PlotSolution.PlumeAngleSixDOF(sols2Plot2,ax,5);
+legend('Unconstrained',['R = ',num2str(radii(1)),'m'],['R = ',num2str(radii(2)),'m'],['R = ',num2str(radii(3)),'m'],['R = ',num2str(radii(4)),'m'],['R = ',num2str(radii(5)),'m'])
+title('Trajectories without attitude control, Engine 5 plume angle from target')
 
 end

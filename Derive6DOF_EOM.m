@@ -146,7 +146,18 @@ function Derive6DOF_EOM
     fprintf(']\n');
 
     %% END 
-
-    
-
+    % Derivation of singular arc given p, lambda_p, w, lambda_w,t, etc
+    fprintf('lambda_wDot = [\n')
+    lambda_wDot=-[diff(H_wTerms,w1);
+        diff(H_wTerms,w2);
+        diff(H_wTerms,w3)];
+    %SwitchFunc = -lambda_w'*Iinv as row vector
+    %SwitchFunc = -Iinv'*lambda_w as column vector
+    %SwitchFuncDerivative = -Iinv'*lambda_wDot
+    dSF_dt = -Iinv'*lambda_wDot;
+    d2SFdt = diff(dSF_dt,w1)*wDot(1)+diff(dSF_dt,w2)*wDot(1)+diff(dSF_dt,w1)*wDot(1)+...
+        diff(dSF_dt,p1)*pDot(1)+diff(dSF_dt,p2)*pDot(2)+diff(dSF_dt,p3)*pDot(3)+...
+        diff(dSF_dt,p1)*pDot(1)+diff(dSF_dt,p2)*pDot(2)+diff(dSF_dt,p3)*pDot(3)+...
+        diff(dSF_dt,p1)*pDot(1)+diff(dSF_dt,p2)*pDot(2)+diff(dSF_dt,p3)*pDot(3)+...
+        
 end

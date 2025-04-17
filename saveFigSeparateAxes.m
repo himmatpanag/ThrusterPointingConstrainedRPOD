@@ -13,7 +13,8 @@ kk=0;
     for ii = 1:numel(h.Children)
         if strcmp(h.Children(ii).Type,'axes')
             kk = kk+1;
-            exportgraphics(h.Children(ii),[h.Name,'ax',num2str(kk),'.png'],...
+            ax=h.Children(ii);
+            exportgraphics(ax,[h.Name,'ax',num2str(kk),'.png'],...
                 'Resolution',400);
         end
     end 

@@ -14,23 +14,23 @@ solverParameters.initialCostateGuess = solution.newCostateGuess;
 
 dynamicRhoSpeedUp = false;
 if contains(type,'rho')
-    rate = 0.99;    
+    rate = 0.8;    
     finalRho = values(1);
     N = ceil(log(finalRho/solverParameters.rho)/log(rate));
     if dynamicStepSize
         dynamicRhoSpeedUp = true;
     end
 elseif contains(type,'epsilon')
-    rate = 0.9;    
+    rate = 0.7;    
     final_epsilon = values(1);
-    N = ceil(log(final_epsilon/problemParameters.constraint.epsilon)/log(rate));
+    N = ceil(log(final_epsilon/problemParameters.constraint.epsilon)/log(.99));
     if dynamicStepSize
         dynamicRhoSpeedUp = true;
     end
 elseif contains(type,'kappa')
-    rate = 0.95;    
+    rate = 0.7;    
     finalKappa = values(1);
-    N = ceil(log(finalKappa/problemParameters.dynamics.torqueCostMultiplier)/log(rate));
+    N = ceil(log(finalKappa/problemParameters.dynamics.torqueCostMultiplier)/log(.99));
     if dynamicStepSize
         dynamicRhoSpeedUp = true;
     end
@@ -60,6 +60,12 @@ while ii < N+1
             targetValue = values(ii);            
             stepSize = (values(ii)-prevValue)/(numFails+1);
             problemParameters.xf(2) = prevValue + stepSize;
+            fprintf('prevValue %f\t stepSize\t%f newValue%f\t',prevValue,stepSize,(prevValue+stepSize));
+        case 'FinalZ_Position'
+            if prevStepPass, prevValue = problemParameters.xf(3); end
+            targetValue = values(ii);            
+            stepSize = (values(ii)-prevValue)/(numFails+1);
+            problemParameters.xf(3) = prevValue + stepSize;
             fprintf('prevValue %f\t stepSize\t%f newValue%f\t',prevValue,stepSize,(prevValue+stepSize));
         % case 'FinalPosVel'
         %     if prevStepPass, prevValue = problemParameters.xf; end
@@ -123,7 +129,7 @@ while ii < N+1
         case 'rhoepsilon'
             if prevStepPass, prevValue = solverParameters.rho; prevValueEps = problemParameters.constraint.epsilon; end             
             if numel(values) > 1, finalEps = values(2); else, finalEps = finalRho; end
-            targetValue = prevValue*rate;
+            targetValue = prevValue*rate; 
             stepSize = (targetValue-prevValue)/(numFails+1);
 
             targetValueEps = prevValueEps*rate;
@@ -203,6 +209,20 @@ while ii < N+1
             problemParameters.dynamics.maxThrust(1:6) = problemParameters.dynamics.maxThrust(1)+problemParameters.dynamics.maxThrust(end) - (prevValue + stepSize);            
             problemParameters.dynamics.maxThrust(7:18) = (prevValue + stepSize);            
             fprintf('prevValue %f\t stepSize\t%f newValue%f\t',prevValue*1e3,stepSize*1e3,(prevValue+stepSize)*1e3);
+        case 'Thrust'
+            if prevStepPass, prevValue = problemParameters.dynamics.maxThrust(end); end             
+            targetValue = values(ii);
+            stepSize = (targetValue-prevValue)/(numFails+1);
+            for jj=1:numel(problemParameters.dynamics.maxThrust)
+                problemParameters.dynamics.maxThrust(jj) = (prevValue + stepSize);
+            end
+            fprintf('prevValue %f\t stepSize\t%f newValue%f\t',prevValue*1e3,stepSize*1e3,(prevValue+stepSize)*1e3);
+        case 'ExhaustVelocity'
+            if prevStepPass, prevValue = problemParameters.dynamics.exhaustVelocity; end             
+            targetValue = values(ii);
+            stepSize = (targetValue-prevValue)/(numFails+1);
+            problemParameters.dynamics.exhaustVelocity=(prevValue + stepSize);
+            fprintf('prevValue %f\t stepSize\t%f newValue%f\t',prevValue,stepSize,(prevValue+stepSize));
         case 'Inertia'
             if prevStepPass
                 prevValue = problemParameters.dynamics.inertia(2,2); 
@@ -232,10 +252,9 @@ while ii < N+1
             solveFunc = @Solve6DOFPointingConstrainedControlProblem;
         end
         if (solverParameters.rho < .2) || (strcmp(type,'Radius')) || (strcmp(type,'kappa'))
-            solverParameters.fSolveOptions.MaxIterations = 30;
-        else
-            solverParameters.fSolveOptions.MaxIterations = 300;
+   %         solverParameters.fSolveOptions.MaxIterations = 30;
         end
+        %solverParameters.fSolveOptions.MaxIterations = 400;
         solverParameters.fSolveOptions.MaxFunctionEvaluations = 2000;
         %  optimoptions('fsolve','Display','iter','MaxFunEvals',1e3,...
         % 'MaxIter',3e1,'TolFun',1e-12,'TolX',1e-12,'StepTolerance',1e-12,...
@@ -264,22 +283,31 @@ while ii < N+1
 
     debug = false; 
     if debug % Put a breakpoint in here to plot latest solutions
-        sol = newSols(end-1);
+        sol = newSols(1);
         PlotSolution.ConvergedCostateTrace(newSols(1:(end-1)))
-        PlotSolution.RotationalSummary(sol); PlotSolution.ThrustProfileAllEngines(sol)
+        PlotSolution.Sweep6DOF(newSols(1:(end-1)))
+        PlotSolution.RotationalSummary(sol);PlotSolution.ThrustProfileAllEngines(sol) 
         PlotSolution.SixDOF_Traj(sol)
-        PlotSolution.PlotOrientationChaserRelativeToTranslationalFrame(sol.x(end,8:10)',sol.x(end,1:3)'*1e3,sol.t(end),sol.problemParameters,gca)
+        PlotSolution.OrientationAtTime(sol,48,gca)
 
+        PlotSolution.PlotOrientationChaserRelativeToTranslationalFrame(sol.x(end,8:10)',sol.x(end,1:3)'*1e3,sol.t(end),sol.problemParameters,gca)
+        
+        sol.solverParameters.rho = 1e-4;
+        s2 = RerunSolution(sol); 
+        sol = s2; sol.solverParameters.initialCostateGuess=sol.newCostateGuess;
+        PlotSolution.CostBreakdown(sol)
     end
 
     if isfield(solution,'finalStateError')
         costateDelta = solution.newCostateGuess-newSols(iter).newCostateGuess;
         [maxVal,maxIdx] = max(abs(costateDelta));
         maxPctChange = maxVal./abs(newSols(iter).newCostateGuess(maxIdx))* 100;
-        costateDeltaNorm = norm(costateDelta);
+        costateDeltaNormPct = norm(costateDelta)/norm(newSols(iter).newCostateGuess);
         solPass = (norm(solution.finalStateError)<1e-7) || ...
-            ((norm(solution.finalStateError)<1e-5) && ( ~any(~solution.solutionFound)));% || ...
-            %((norm(solution.finalStateError)<1e-4) && (costateDeltaNorm < 1e-2) && maxPctChange < 0.05);
+            ((norm(solution.finalStateError)<1e-4) && (costateDeltaNormPct < 1e-2) && maxPctChange < 0.1 && solverParameters.rho < 3e-2) || ...
+            ((norm(solution.finalStateError)<1e-6) && ( ~any(~solution.solutionFound)));% || ...
+            %((norm(solution.finalStateError)<1e-4) && ( ~any(~solution.solutionFound))) || ...
+            
     else
         solPass = ~any(~solution.solutionFound);
     end
@@ -288,7 +316,7 @@ while ii < N+1
         numFails = numFails+1;
         prevStepPass = false;            
         if dynamicRhoSpeedUp
-            rate = min(.99,rate+.1);        
+            rate = min(.999,rate+.1);        
         end
     else 
         iter = iter+1;
@@ -300,7 +328,7 @@ while ii < N+1
         newSols(iter) = solution;
         prevPassedStepSize = stepSize;
         if dynamicRhoSpeedUp
-            rate = max(rhoMin,rate-.02);        
+            rate = max(rhoMin,rate-.05);        
         end
     end 
 end 

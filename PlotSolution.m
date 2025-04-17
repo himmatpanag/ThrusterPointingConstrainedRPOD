@@ -123,41 +123,50 @@ methods(Static)
     end
 
     function hf = Sweep6DOF(solutions,sweepType)
-        if nargin < 2 
-            sweepType = 'rho';
-        end 
-        numTraj = 7; 
         N = numel(solutions);
+        numTraj = min(5,N); 
         solsToPlot = round(linspace(1,N,numTraj));
+        if nargin < 2 
+            [xVals, xLab, symb,sweepType] = PlotSolution.DetectSweep(solutions(solsToPlot));
+        end 
         hf = figure; 
-        eng2Plot = find(any(solutions(1).throttle'>0.1));
-        torq2Plot = find(any(solutions(end).torqueInertialFrame'>0.01));
-        numEnginesToPlot = nnz(any(solutions(1).throttle'>0.1));
-        numTorquesToPlot = nnz(any(solutions(end).torqueInertialFrame'>0.01));
-        numCols = ceil(sqrt(numEnginesToPlot+numTorquesToPlot))+1;
-        numRows = ceil((numEnginesToPlot+numTorquesToPlot)/numCols)+1;
+        eng2Plot = [];
+        torq2Plot = [];
+        for jj = 1:numTraj
+            idx = solsToPlot(jj);
+            eng2Plot = union(eng2Plot,find(any(solutions(idx).throttle'>0.1)));
+            torq2Plot = union(torq2Plot,find(any(solutions(idx).torqueInertialFrame'>0.01)));
+        end
+        numEnginesToPlot = numel(eng2Plot);
+        numTorquesToPlot = numel(torq2Plot);
+        numCols = ceil(sqrt(numEnginesToPlot+numTorquesToPlot+1))+1;
+        numRows = ceil((numEnginesToPlot+numTorquesToPlot+1)/numCols)+1;
+        Cols = GetColors(numTraj);
         for ii = 1:numTraj
             idx = solsToPlot(ii);
             solution = solutions(idx);            
             ax = subplot(numRows,numCols,1:numCols);  grid on; hold on;
             summary = GetSolutionSummary(solution); 
-
+            C = Cols(ii,:);
             switch sweepType
                 case 'rho'
                     if isfield(solution,'rho'), rhoVal = solution.rho; else rhoVal = solution.solverParameters.rho; end
-                    plot3(solution.x(:,1), solution.x(:,2), solution.x(:,3), 'LineWidth',2, 'DisplayName',['\rho = ',num2str(rhoVal)]);
+                    plot3(solution.x(:,1), solution.x(:,2), solution.x(:,3), 'LineWidth',2,'Color',C, 'DisplayName',['\rho = ',num2str(rhoVal)]);
                     title(['Optimal trajectory \rho sweep, ', summary.constraintString])
                 case 'Angle'
-                    plot3(solution.x(:,1), solution.x(:,2), solution.x(:,3), 'LineWidth',2, 'DisplayName',['\alpha = ',num2str(solution.problemParameters.constraint.alpha0*180/pi)]);
+                    plot3(solution.x(:,1), solution.x(:,2), solution.x(:,3), 'LineWidth',2,'Color',C, 'DisplayName',['\alpha = ',num2str(solution.problemParameters.constraint.alpha0*180/pi)]);
                 case 'Radius'
-                    plot3(solution.x(:,1), solution.x(:,2), solution.x(:,3), 'LineWidth',2, 'DisplayName',['R = ',num2str(solution.problemParameters.constraint.targetRadius*1000)]);
+                    plot3(solution.x(:,1), solution.x(:,2), solution.x(:,3), 'LineWidth',2,'Color',C, 'DisplayName',['R = ',num2str(solution.problemParameters.constraint.targetRadius*1000)]);
                 case 'epsilon'
-                    plot3(solution.x(:,1), solution.x(:,2), solution.x(:,3), 'LineWidth',2, 'DisplayName',['\epsilon = ',num2str(solution.problemParameters.constraint.epsilon)]);
+                    plot3(solution.x(:,1), solution.x(:,2), solution.x(:,3), 'LineWidth',2,'Color',C, 'DisplayName',['\epsilon = ',num2str(solution.problemParameters.constraint.epsilon)]);
                 case 'kappa'
-                    plot3(solution.x(:,1), solution.x(:,2), solution.x(:,3), 'LineWidth',2, 'DisplayName',['\kappa = ',num2str(solution.problemParameters.dynamics.torqueCostMultiplier)]);
+                    plot3(solution.x(:,1), solution.x(:,2), solution.x(:,3), 'LineWidth',2,'Color',C, 'DisplayName',['\kappa = ',num2str(solution.problemParameters.dynamics.torqueCostMultiplier)]);
+                otherwise 
+                    plot3(solution.x(:,1)*1e3, solution.x(:,2)*1e3, solution.x(:,3)*1e3, 'LineWidth',2,'Color',C, 'DisplayName',...
+                        [symb(ii),' = ',num2str(xVals(ii))]);
             end 
             ax.View = [-90,-90]; legend('show','Location','best')            
-            C = ax.Children(1).Color;
+            %C = ax.Children(1).Color;
             % Add engine plots
             for jj = 1:numEnginesToPlot 
                 engIdx = eng2Plot(jj);
@@ -172,14 +181,10 @@ methods(Static)
                 title(['Engine ',num2str(engIdx)]);
             end
             if isfield(solution.problemParameters.dynamics,'torqueCostMultiplier')
-                PlotSolution.CostBreakdown(solution,subplot(numRows,numCols,numCols+jj+1)); legend('hide'); ylabel('Mass (kg)'); title('Fuel Consumption')
+                PlotSolution.MassConsumption(solution,subplot(numRows,numCols,numCols+jj+1),'',C); legend('hide'); ylabel('Mass (g)'); title('Fuel Consumption')
             end
             if numTorquesToPlot>0
-                S = zeros(3,numel(solution.t));
-                for ll = 1:numel(solution.t)
-                    lambda_w = solution.x(ll,24:26)';
-                    S(:,ll) = -solution.problemParameters.dynamics.inertiaInverse*lambda_w;
-                end
+                S = PlotSolution.GetTorqueSwitchFunction(solution);
                 titStrings = {['\tau_1'],['\tau_2'],['\tau_3']};
                 kapStr = ['\kappa=',num2str(solution.problemParameters.dynamics.torqueCostMultiplier)];
                 for kk=1:numTorquesToPlot
@@ -189,7 +194,7 @@ methods(Static)
                     plot(solution.t,solution.torqueInertialFrame(torqIdx,:),'-','LineWidth',2,'Color',C,'DisplayName','Control Torque');
                     yyaxis right; grid on; hold on;
                     ylabel('Switch Function');
-                    plot(solution.t,S(torqIdx,:),'--','LineWidth',2,'Color',C,'DisplayName',['Switch Func',num2str(torqIdx)]); 
+                    plot(solution.t,S(torqIdx,:),'--','LineWidth',1,'Color',C,'DisplayName',['Switch Func',num2str(torqIdx)]); 
                     if kk==1, title([titStrings{torqIdx},', ',kapStr]); else, title(titStrings{torqIdx}); end
                 end
             end
@@ -207,7 +212,13 @@ methods(Static)
         end
         linkaxes(ax2,'x');
     end 
-
+    function S = GetTorqueSwitchFunction(solution)
+        S = zeros(3,numel(solution.t));
+        for ll = 1:numel(solution.t)
+            lambda_w = solution.x(ll,24:26)';
+            S(:,ll) = -solution.problemParameters.dynamics.inertiaInverse*lambda_w;
+        end
+    end
     function hf = Costates(solution,axIn)
         if nargin < 2 
             hf = figure;
@@ -361,16 +372,17 @@ methods(Static)
         legend('show',  'Location','best');
     end 
 
-    function MassConsumption(solution,ax,dispName)
+    function MassConsumption(solution,ax,dispName, col)
         if nargin<3, summary = GetSolutionSummary(solution); dispName = summary.constraintString; end 
         axes(ax); grid on; hold on; title('Fuel consumption')
-        xlabel('t'); ylabel('Fuel consumption (g)')        
+        if nargin < 4, t = colororder; col = t(ax.ColorOrderIndex-1,:); end
+        xlabel('Time (s)'); ylabel('Fuel consumption (g)')        
         
         massConsumption = -1000*(solution.x(:,7)-solution.x(1,7));
-        plot(solution.t,massConsumption,'LineWidth',2,'DisplayName',dispName);
-        legend('show',  'Location','best'); t = colororder;
+        plot(solution.t,massConsumption,'Color',col,'LineWidth',2,'DisplayName',dispName);
+        legend('show',  'Location','best'); 
         t2=text(solution.t(end),(massConsumption(end)),['\leftarrow',num2str(round(massConsumption(end))), ...
-            'g'],'Color',t(ax.ColorOrderIndex-1,:),'FontSize',12,'HorizontalAlignment','left');
+            'g'],'Color',col,'FontSize',12,'HorizontalAlignment','left');
     end 
 
     function ThrustProfile(solution,ax,legStr,convex)
@@ -546,6 +558,65 @@ methods(Static)
         end
     end
 
+    function addThrustDirection6DOF(solution,ax,customPlot)
+        if nargin < 3
+            customPlot.arrowLength = 1;
+            customPlot.arrowSpacing = 1; % seconds
+            customPlot.enginesToPlot = 1:solution.problemParameters.dynamics.numEngines;
+        end
+        axes(ax);
+        axisLength = max(ax.XLim(2)-ax.XLim(1),ax.YLim(2)-ax.YLim(1));
+
+        % Make time steps linearly spaced
+        numTimeSteps = 300;
+        times = linspace(solution.t(1),solution.t(end),numTimeSteps);
+        h=times(2)-times(1); hIdx = max(1,customPlot.arrowSpacing/h);
+        
+        sol.x = interpn(solution.t,solution.x,times)';
+        sol.throttle = interpn(solution.t,solution.throttle',times);
+        numEngines=solution.problemParameters.dynamics.numEngines;
+        C = linspecer(numEngines);
+        for ii = customPlot.enginesToPlot
+            kk = 1; kkMax = 5; 
+            throttleOn = sol.throttle(ii,:)>0.1; 
+            throttleOnIdx = find(throttleOn,1,'first');
+            clear idxOn idxOff
+            while (kk < kkMax) && (~isempty(throttleOnIdx))% max number of shaded regions to plot
+                idxOn(kk) = throttleOnIdx;
+                throttleOff = throttleOnIdx + find(~throttleOn(idxOn(kk):end),1,'first')-1;
+                if isempty(throttleOff)
+                    idxOff(kk) = numel(times);
+                else
+                    idxOff(kk) = throttleOff;
+                end
+                throttleOn(idxOn(kk):idxOff(kk)) = false;
+
+                % Plot arrows
+                idxs=round([idxOn(kk),(idxOn(kk)+hIdx):hIdx:(idxOff(kk)-hIdx),idxOff(kk)]);
+                plumeDir = zeros(3,numel(idxs));
+                for jj = 1:numel(idxs)
+                    idx = idxs(jj);
+                    p = sol.x(idx,8:10)';
+                    DCM_BodyToInertial = mrp2DCM(p);
+                    DCM_InertialToLVLH = DCM_InertialToRotating(solution.problemParameters.dynamics.frameRotationRate,times(idx));
+                    DCM_BodyToLVLH = DCM_InertialToLVLH*DCM_BodyToInertial;
+                    plumeDir(:,jj) = -DCM_BodyToLVLH*solution.problemParameters.dynamics.thrustDirectionBody(:,ii);
+                end
+                quiver3(sol.x(idxs,1)*1e3, sol.x(idxs,2)*1e3, sol.x(idxs,3)*1e3,...
+                    customPlot.arrowLength.*plumeDir(1,:)', ...
+                    customPlot.arrowLength.*plumeDir(2,:)', ...
+                    customPlot.arrowLength.*plumeDir(3,:)',...
+                    0,'Color',C(ii,:)',...
+                    'LineWidth',1.5,'MaxHeadSize',.15,'HandleVisibility','off')
+
+                % Find next region throttle is on 
+                throttleOnIdx = find(throttleOn,1,'first');
+                kk = kk+1;
+            end
+        end
+
+    end
+
     function ThrustConeDirection(sol,ax,useTrajColor,arrowLengthFactor)
         if nargin < 4
             arrowLengthFactor=2;
@@ -582,11 +653,19 @@ methods(Static)
 
     function PrintConvergedCostates(solsToDisplay)
         titleRow = 'Costate';
+        
         rows = {'$\lambda_{r_1}$', '$\lambda_{r_2}$',... 
             '$\lambda_{r_3}$', '$\lambda_{v_1}$', '$\lambda_{v_2}$', '$\lambda_{v_3}$',...
             '$\lambda_m$'};
+        if size(solsToDisplay(1).x,2)==26
+            rows = {rows{:},'$\lambda_{p_1}$','$\lambda_{p_2}$','$\lambda_{p_r}$',...
+            '$\lambda_{\omega_x}$','$\lambda_{\omega_y}$','$\lambda_{\omega_z}$'};
+        end
         for ii = 1:numel(solsToDisplay)
             solution = solsToDisplay(ii);
+            if ~isfield(solution,'constraint') || ~isstruct(solution.constraint)
+                solution.constraint = solution.problemParameters.constraint;
+            end
             if solution.constraint.type == POINTING_CONSTRAINT_TYPE.NONE
                 titleRow = [titleRow, ' & Unconstrained'];
             elseif solution.constraint.type == POINTING_CONSTRAINT_TYPE.ORIGIN_CONSTANT_ANGLE
@@ -598,14 +677,38 @@ methods(Static)
         end 
         disp(titleRow)
         
-        disp('\hline')
-        for ii = 1:7
+        disp('\hline');
+
+        row = '\rho';
+        for jj = 1:numel(solsToDisplay)
+            solution = solsToDisplay(jj);
+            row = [row,' & ',num2str(solution.solverParameters.rho,'%.5g')];
+        end 
+        row = [row,'\\'];disp(row);
+        if isfield(solution(1).problemParameters.dynamics,'torqueCostMultiplier')
+            row = '\kappa';
+            for jj = 1:numel(solsToDisplay)
+                solution = solsToDisplay(jj);
+                row = [row,' & ',num2str(solution.problemParameters.dynamics.torqueCostMultiplier,'%.5g')];
+            end 
+            row = [row,'\\'];disp(row);
+        end
+        if isfield(solution(1).problemParameters.constraint,'epsilon')
+            row = '\epsilon';
+            for jj = 1:numel(solsToDisplay)
+                solution = solsToDisplay(jj);
+                row = [row,' & ',num2str(solution.problemParameters.constraint.epsilon,'%.5g')];
+            end 
+            row = [row,'\\'];disp(row);
+        end
+        
+        for ii = 1:numel(rows)
             row = rows{ii};
             for jj = 1:numel(solsToDisplay)
                 solution = solsToDisplay(jj);
                 row = [row,' & ',num2str(solution.newCostateGuess(ii),'%.9g')];
             end 
-            if ii < 7, row = [row,'\\']; end
+            if ii < numel(rows), row = [row,'\\']; end
             disp(row);
         end 
     end 
@@ -638,10 +741,11 @@ methods(Static)
         end
     end
     function [p,s] = PlotOrientationChaserRelativeToTranslationalFrame(p,pos,t,problemParameters,throttle, ax,customPlot)
-        if nargin < 7, showArrows=true;
+        showArrows=true;
+        if nargin < 7
             cubeOpacity = .05; coneHeightFactor = 1;cubeLengthScale=1;coneOffOpacity=.2; handVis = 'on';
         else
-            showArrows = true;
+            if isfield(customPlot,'showArrows'), showArrows = customPlot.showArrows; end
             cubeOpacity = customPlot.cubeOpacity;
             coneHeightFactor = customPlot.coneHeightFactor;
             coneOffOpacity = customPlot.coneOffOpacity;
@@ -683,18 +787,20 @@ methods(Static)
                 coneAng = pi/7;
             end 
             coneHeight = cubeLength/5 * coneHeightFactor;
-            s(ii) = PlotSolution.PlotCone(ax,coneAng,C(ii,:),coneHeight,plumeDir,posEngine);
+            %s(ii) = PlotSolution.PlotCone(ax,coneAng,C(ii,:),coneHeight,plumeDir,posEngine);
+            faceAlpha = max(coneOffOpacity,min(1,coneOffOpacity+throttle(ii)));
+            s(ii) = PlotSolution.PlotEngine(ax,C(ii,:),coneHeight,plumeDir,posEngine,faceAlpha);
             s(ii).DisplayName = ['Engine ',num2str(ii)];
-            s(ii).FaceAlpha = max(coneOffOpacity,min(1,coneOffOpacity+throttle(ii)));
+            s(ii).FaceAlpha = faceAlpha;
             s(ii).HandleVisibility = handVis;
             if showArrows && throttle(ii) > .6
-                arrowLength = coneHeight*2;
+                arrowLength = coneHeight*3;
                 posArrowStart = posEngine + coneHeight*plumeDir;
                 p=quiver3(posArrowStart(1), posArrowStart(2),posArrowStart(3),...
                 arrowLength.*plumeDir(1), ...
                 arrowLength.*plumeDir(2), ...
                 arrowLength.*plumeDir(3),...
-                0,'LineWidth',2,'MaxHeadSize',2,'HandleVisibility','off', ...
+                0,'LineWidth',2,'MaxHeadSize',3,'HandleVisibility','off', ...
                 'Color',C(ii,:));
             end
             %plot3(posEngine(1),posEngine(2),posEngine(3),'.','Color',C(ii,:),'HandleVisibility','off','MarkerSize',15);
@@ -707,6 +813,144 @@ methods(Static)
         axis equal; xlabel('x (m)'); ylabel('y (m)'); zlabel('z (m)')
         ax.View = [32 30];
     end
+
+    function s = PlotCylinder(ax, radius, height, origin, direction)
+        % Plot a cylinder of given radius and height, centered at origin, oriented along direction
+        % Inputs:
+        %   ax - axes handle to plot on
+        %   radius - scalar radius of cylinder
+        %   height - scalar height of cylinder
+        %   origin - 3x1 vector specifying center point
+        %   direction - 3x1 unit vector specifying orientation
+        
+        % Create cylinder coordinates
+        theta = linspace(0, 2*pi, 50);
+        z = linspace(0, height, 20);
+        [THETA, Z] = meshgrid(theta, z);
+        
+        % Create cylinder surface
+        X = radius * cos(THETA);
+        Y = radius * sin(THETA);
+        
+        % Create surface points
+        points = [X(:), Y(:), Z(:)]';
+        
+        % Rotate points to align with direction vector
+        if ~isequal(direction, [0;0;1])
+            % Find rotation axis and angle
+            rotAxis = cross([0;0;1], direction);
+            rotAngle = acos(dot([0;0;1], direction));
+            if rotAngle > 179*pi/180
+                rotAxis = [1;0;0];
+            end
+            if ~isreal(rotAngle)
+                rotAngle = 180;
+            end
+            % Create rotation matrix
+            R = axang2rotm([rotAxis' rotAngle]);
+            points = R * points;
+        end
+
+        % Translate points to origin
+        points = points + origin;
+        
+        % Reshape back to surface coordinates
+        X = reshape(points(1,:), size(THETA));
+        Y = reshape(points(2,:), size(THETA));
+        Z = reshape(points(3,:), size(THETA));
+        
+        % Plot cylinder
+        axes(ax);
+        s = surf(X, Y, Z);
+        
+        % Set appearance
+        set(s, 'FaceColor', 'b', 'FaceAlpha', 0.5, 'EdgeAlpha', 0.3);
+    end
+
+    function s = PlotTruncatedParaboloid(ax, radius, height, truncHeight, origin, direction, color, alpha)
+        % Plot a paraboloid (parabolic nozzle) of given radius and height
+        % Inputs:
+        %   ax - axes handle to plot on
+        %   radius - scalar radius at the base of the paraboloid
+        %   height - scalar height of the paraboloid
+        %   origin - 3x1 vector specifying center point of the base
+        %   direction - 3x1 unit vector specifying orientation
+        %   color - RGB color vector or color string
+        %   alpha - transparency value between 0 and 1
+        
+        if nargin < 6
+            color = 'b';
+        end
+        if nargin < 7
+            alpha = 0.5;
+        end
+        
+        % Create paraboloid coordinates
+        theta = linspace(0, 2*pi, 50);
+        h = linspace(0, height-truncHeight, 20);
+        [THETA, H] = meshgrid(theta, h);
+        
+        % Create paraboloid surface
+        % r = radius * (1 - h/height) for a linear taper
+        % r = radius * sqrt(1 - h/height) for a parabolic shape
+        R = radius * sqrt(1 - H/height);
+        X = R .* cos(THETA);
+        Y = R .* sin(THETA);
+        Z = H;
+        
+        % Create surface points
+        points = [X(:), Y(:), Z(:)]';
+
+        % Rotate points to align with direction vector
+        if ~isequal(direction, [0;0;1])
+            % Find rotation axis and angle
+            rotAxis = cross([0;0;1], direction);
+            rotAngle = acos(dot([0;0;1], direction));
+            if rotAngle > 179*pi/180
+                rotAxis = [1;0;0];
+            end
+            if ~isreal(rotAngle)
+                rotAngle = 180;
+            end
+            % Create rotation matrix
+            R = axang2rotm([rotAxis' rotAngle]);
+            points = R * points;
+        end
+        
+        % Translate points to origin
+        points = points + origin;
+        
+        % Reshape back to surface coordinates
+        X = reshape(points(1,:), size(THETA));
+        Y = reshape(points(2,:), size(THETA));
+        Z = reshape(points(3,:), size(THETA));
+        
+        % Plot paraboloid
+        axes(ax);
+        s = surf(X, Y, Z);
+        
+        % Set appearance
+        set(s, 'FaceColor', color, 'FaceAlpha', alpha, 'EdgeAlpha', 0.3);
+    end
+
+    function s = PlotEngine(ax,color,height,unitVec,origin,alpha)
+        % plot a parabloid shaped expansion nozzle of thruster engine.
+        % Bell
+        % height = height of bell
+        % unitVec = direction of plume/bell
+        % origin = base of bell
+        throatRadius=.2*height;
+        cylHeight = .7*throatRadius;
+        s1 = PlotSolution.PlotCylinder(ax,throatRadius,cylHeight,origin,unitVec);
+        s1.HandleVisibility = 'off';
+        s1.FaceAlpha = alpha;
+        s1.FaceColor= color;
+        s1.EdgeAlpha=0;
+        
+        parabloidRad = sqrt(height/cylHeight)*throatRadius;
+        s = PlotSolution.PlotTruncatedParaboloid(ax, parabloidRad, height,cylHeight, origin+unitVec*height, -unitVec, color, alpha);
+        s.EdgeAlpha=0;
+    end        
 
     function s = PlotCone(ax,alpha,color,height,unitVec,origin)
         axes(ax);
@@ -951,25 +1195,29 @@ methods(Static)
         PlotSolution.Torque(sol,subplot(3,1,3));
     end 
 
-    function [xVals, xLab, symb] = DetectSweep(sols)
+    function [xVals, xLab, symb,sweepType] = DetectSweep(sols)
         N = numel(sols);
         xVals = zeros(N,1);
         if sols(1).solverParameters.rho ~= sols(3).solverParameters.rho % This is a rho sweep
             for ii = 1:N, xVals(ii) = sols(ii).solverParameters.rho; end 
             xLab = 'Throttle smoothing parameter \rho'; 
             symb = '\rho';
+            sweepType = 'rho';
         elseif isfield(sols(1).problemParameters.constraint,'targetRadius') && (sols(1).problemParameters.constraint.targetRadius ~= sols(3).problemParameters.constraint.targetRadius)
             for ii = 1:N, xVals(ii) = 1000*sols(ii).problemParameters.constraint.targetRadius; end 
             xLab = 'Target Radius (m)'; 
             symb = 'R';
+            sweepType = 'Radius';
         elseif isfield(sols(1).problemParameters.constraint,'epsilon') && sols(1).problemParameters.constraint.epsilon ~= sols(3).problemParameters.constraint.epsilon
             for ii = 1:N, xVals(ii) = sols(ii).problemParameters.constraint.epsilon; end 
             xLab = 'Constraint smoothing parameter \epsilon'; 
             symb = '\epsilon';
+            sweepType = 'epsilon';
         elseif isfield(sols(1).problemParameters.dynamics,'torqueCostMultiplier') && sols(1).problemParameters.dynamics.torqueCostMultiplier ~= sols(3).problemParameters.dynamics.torqueCostMultiplier
             for ii = 1:N, xVals(ii) = sols(ii).problemParameters.dynamics.torqueCostMultiplier; end 
             xLab = 'Torque Cost smoothing parameter \kappa'; 
             symb = '\kappa';
+            sweepType = 'kappa';
         elseif sols(1).problemParameters.dynamics.maxThrust(1) ~=sols(4).problemParameters.dynamics.maxThrust(1)
             for ii = 1:N, xVals(ii) = sols(ii).problemParameters.dynamics.maxThrust(end); end 
             xLab = 'Thrust Value'; 
@@ -978,6 +1226,15 @@ methods(Static)
             for ii = 1:N, xVals(ii) = sols(ii).problemParameters.dynamics.inertia(2,2); end 
             xLab = 'Inertia'; 
             symb = 'I';
+        elseif any(sols(1).problemParameters.xf ~=sols(2).problemParameters.xf)
+            diff=sols(1).problemParameters.xf ~=sols(2).problemParameters.xf;
+            idx = find(diff,1,'first');
+            for ii = 1:N, xVals(ii) = sols(ii).problemParameters.xf(idx)*1e3; end 
+            XLabs = {'Final Pos X','Final Pos Y','Final Pos Z'};
+            symbs = {'x(t_{f})','y(t_{f})','z(t_{f})'};
+            xLab=XLabs{idx};
+            symb = symbs{idx};
+            sweepType='Final State';
         end
     end
 
@@ -1133,7 +1390,8 @@ methods(Static)
         disp('Video saved as ChaserTrajectoryAnimation.mp4');
     end
 
-    function TimeSeriesThrottleOnOff(data,solution,displayStr,ax)
+    function TimeSeriesThrottleOnOff(data,solution,displayStr,ax,col)
+        if nargin < 5, useCol = false; else, useCol = true; end
         if nargin < 4, figure; ax = gca; end 
         K = size(data,1);
         if nargin < 3, displayStr = repmat({''},K,1); end
@@ -1149,9 +1407,15 @@ methods(Static)
             dataOn = data(ii,:); dataOff = dataOn;
             dataOn(~throttleOn)=nan;
             dataOff(throttleOn)=nan;
-            plot(solution.t, dataOn,'-','LineWidth',3, 'DisplayName',displayStr{ii});
-            ReduceColorOrderIndex(ax);
-            plot(solution.t, dataOff,'--','LineWidth',1,'HandleVisibility','off');
+            if useCol
+                plot(solution.t, dataOn,'-','Color',col,'LineWidth',3, 'DisplayName',displayStr{ii});
+                ReduceColorOrderIndex(ax);
+                plot(solution.t, dataOff,'--','Color',col,'LineWidth',1,'HandleVisibility','off');
+            else
+                plot(solution.t, dataOn,'-','LineWidth',3, 'DisplayName',displayStr{ii});
+                ReduceColorOrderIndex(ax);
+                plot(solution.t, dataOff,'--','LineWidth',1,'HandleVisibility','off');
+            end
         end
         legend('show','Location','best')
     end
@@ -1199,6 +1463,19 @@ methods(Static)
         gca;p=patch(x_annulus, y_annulus, C, 'FaceColor', C, 'FaceAlpha', 0.2, ...
           'EdgeColor', C, 'LineWidth', 1, 'HandleVisibility', 'off', ...
           'LineStyle', '--');
+    end
+
+    function stateLabels = GetStateLabels(solution)
+        if size(solution.x,2)==26
+            stateLabels = {'r_x','r_y','r_z','v_x','v_y','v_z','m','p_1','p_2','p_r',...
+            '\omega_x','\omega_y','\omega_z',...
+            '\lambda_{r_x}','\lambda_{r_y}','\lambda_{r_z}',...
+            '\lambda_{v_x}','\lambda_{v_y}','\lambda_{v_z}', '\lambda_m',...
+            '\lambda_{p_1}','\lambda_{p_2}','\lambda_{p_r}',...
+            '\lambda_{\omega_x}','\lambda_{\omega_y}','\lambda_{\omega_z}'};
+        else 
+            stateLabels = {};
+        end
     end
 
     function h = TorqueSwitchFunction(solution)

@@ -30,6 +30,7 @@ function [numEngines, locations, thrustDirection] = GetEngineLocations(engineCon
                     mm = mm + 1; 
                 end
             end
+            thrustDirection = thrustDirection./vecnorm(thrustDirection);
         case THRUSTER_CONFIGURATION.CG_6_RCS_12
             [numEngines1, locations1, thrustDirection1] = GetEngineLocations(THRUSTER_CONFIGURATION.CG_ALIGNED_6);
             [numEngines2, locations2, thrustDirection2] = GetEngineLocations(THRUSTER_CONFIGURATION.RCS_12);

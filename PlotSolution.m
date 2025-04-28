@@ -21,11 +21,15 @@ methods(Static)
         end 
         PlotSolution.addTrajectory(solution,ax1);
                  
-        switch solution.constraint.type
+        switch solution.problemParameters.constraint.type
             case POINTING_CONSTRAINT_TYPE.ORIGIN_VARIABLE_ANGLE
                 s = PlotSphereConstraint(ax1,solution.problemParameters.constraint.targetRadius*1e3,[0;0;0]);
                 set(s,'EdgeAlpha',0);
                 title('Optimal trajectory with spherical target constraint')
+            case POINTING_CONSTRAINT_TYPE.ELLIPSOIDAL
+                s = PlotEllipsoidConstraint(ax1,solution.problemParameters);
+                set(s,'EdgeAlpha',0);
+                title('Optimal trajectory with ellipsoidal target constraint')
         end 
         t = gca; % t.View = [-2.0180   41.0092];
         t.View = [-90,-90];
@@ -142,6 +146,7 @@ methods(Static)
         numCols = ceil(sqrt(numEnginesToPlot+numTorquesToPlot+1))+1;
         numRows = ceil((numEnginesToPlot+numTorquesToPlot+1)/numCols)+1;
         Cols = GetColors(numTraj);
+
         for ii = 1:numTraj
             idx = solsToPlot(ii);
             solution = solutions(idx);            
@@ -181,6 +186,7 @@ methods(Static)
                 title(['Engine ',num2str(engIdx)]);
             end
             if isfield(solution.problemParameters.dynamics,'torqueCostMultiplier')
+
                 PlotSolution.MassConsumption(solution,subplot(numRows,numCols,numCols+jj+1),'',C); legend('hide'); ylabel('Mass (g)'); title('Fuel Consumption')
             end
             if numTorquesToPlot>0
@@ -194,6 +200,7 @@ methods(Static)
                     plot(solution.t,solution.torqueInertialFrame(torqIdx,:),'-','LineWidth',2,'Color',C,'DisplayName','Control Torque');
                     yyaxis right; grid on; hold on;
                     ylabel('Switch Function');
+
                     plot(solution.t,S(torqIdx,:),'--','LineWidth',1,'Color',C,'DisplayName',['Switch Func',num2str(torqIdx)]); 
                     if kk==1, title([titStrings{torqIdx},', ',kapStr]); else, title(titStrings{torqIdx}); end
                 end
@@ -219,6 +226,7 @@ methods(Static)
             S(:,ll) = -solution.problemParameters.dynamics.inertiaInverse*lambda_w;
         end
     end
+
     function hf = Costates(solution,axIn)
         if nargin < 2 
             hf = figure;
@@ -276,6 +284,10 @@ methods(Static)
                 s = PlotSphereConstraint(ax,solution.problemParameters.constraint.targetRadius,[0;0;0]);
                 set(s,'EdgeAlpha',0);
                 title('Optimal trajectory with spherical target constraint')
+            case POINTING_CONSTRAINT_TYPE.ELLIPSOIDAL
+                s = PlotEllipsoidConstraint(ax,solution.problemParameters);
+                set(s,'EdgeAlpha',0);
+                title('Optimal trajectory with ellipsoidal target constraint') 
         end                
         
         % plot switch function and throttle versus time 
@@ -357,6 +369,65 @@ methods(Static)
         end
     end
 
+    function addThrustDirection6DOF(solution,ax,customPlot)
+            if nargin < 3
+                customPlot.arrowLength = 1;
+                customPlot.arrowSpacing = 1; % seconds
+                customPlot.enginesToPlot = 1:solution.problemParameters.dynamics.numEngines;
+            end
+            axes(ax);
+            axisLength = max(ax.XLim(2)-ax.XLim(1),ax.YLim(2)-ax.YLim(1));
+    
+            % Make time steps linearly spaced
+            numTimeSteps = 300;
+            times = linspace(solution.t(1),solution.t(end),numTimeSteps);
+            h=times(2)-times(1); hIdx = max(1,customPlot.arrowSpacing/h);
+            
+            sol.x = interpn(solution.t,solution.x,times)';
+            sol.throttle = interpn(solution.t,solution.throttle',times);
+            numEngines=solution.problemParameters.dynamics.numEngines;
+            C = linspecer(numEngines);
+            for ii = customPlot.enginesToPlot
+                kk = 1; kkMax = 5; 
+                throttleOn = sol.throttle(ii,:)>0.1; 
+                throttleOnIdx = find(throttleOn,1,'first');
+                clear idxOn idxOff
+                while (kk < kkMax) && (~isempty(throttleOnIdx))% max number of shaded regions to plot
+                    idxOn(kk) = throttleOnIdx;
+                    throttleOff = throttleOnIdx + find(~throttleOn(idxOn(kk):end),1,'first')-1;
+                    if isempty(throttleOff)
+                        idxOff(kk) = numel(times);
+                    else
+                        idxOff(kk) = throttleOff;
+                    end
+                    throttleOn(idxOn(kk):idxOff(kk)) = false;
+    
+                    % Plot arrows
+                    idxs=round([idxOn(kk),(idxOn(kk)+hIdx):hIdx:(idxOff(kk)-hIdx),idxOff(kk)]);
+                    plumeDir = zeros(3,numel(idxs));
+                    for jj = 1:numel(idxs)
+                        idx = idxs(jj);
+                        p = sol.x(idx,8:10)';
+                        DCM_BodyToInertial = mrp2DCM(p);
+                        DCM_InertialToLVLH = DCM_InertialToRotating(solution.problemParameters.dynamics.frameRotationRate,times(idx));
+                        DCM_BodyToLVLH = DCM_InertialToLVLH*DCM_BodyToInertial;
+                        plumeDir(:,jj) = -DCM_BodyToLVLH*solution.problemParameters.dynamics.thrustDirectionBody(:,ii);
+                    end
+                    quiver3(sol.x(idxs,1)*1e3, sol.x(idxs,2)*1e3, sol.x(idxs,3)*1e3,...
+                        customPlot.arrowLength.*plumeDir(1,:)', ...
+                        customPlot.arrowLength.*plumeDir(2,:)', ...
+                        customPlot.arrowLength.*plumeDir(3,:)',...
+                        0,'Color',C(ii,:)',...
+                        'LineWidth',1.5,'MaxHeadSize',.15,'HandleVisibility','off')
+    
+                    % Find next region throttle is on 
+                    throttleOnIdx = find(throttleOn,1,'first');
+                    kk = kk+1;
+                end
+            end
+    
+    end
+
     function ControlDirectionAngle(solution, ax)
         summary = GetSolutionSummary(solution); 
         axes(ax)
@@ -383,6 +454,7 @@ methods(Static)
         legend('show',  'Location','best'); 
         t2=text(solution.t(end),(massConsumption(end)),['\leftarrow',num2str(round(massConsumption(end))), ...
             'g'],'Color',col,'FontSize',12,'HorizontalAlignment','left');
+
     end 
 
     function ThrustProfile(solution,ax,legStr,convex)
@@ -558,65 +630,6 @@ methods(Static)
         end
     end
 
-    function addThrustDirection6DOF(solution,ax,customPlot)
-        if nargin < 3
-            customPlot.arrowLength = 1;
-            customPlot.arrowSpacing = 1; % seconds
-            customPlot.enginesToPlot = 1:solution.problemParameters.dynamics.numEngines;
-        end
-        axes(ax);
-        axisLength = max(ax.XLim(2)-ax.XLim(1),ax.YLim(2)-ax.YLim(1));
-
-        % Make time steps linearly spaced
-        numTimeSteps = 300;
-        times = linspace(solution.t(1),solution.t(end),numTimeSteps);
-        h=times(2)-times(1); hIdx = max(1,customPlot.arrowSpacing/h);
-        
-        sol.x = interpn(solution.t,solution.x,times)';
-        sol.throttle = interpn(solution.t,solution.throttle',times);
-        numEngines=solution.problemParameters.dynamics.numEngines;
-        C = linspecer(numEngines);
-        for ii = customPlot.enginesToPlot
-            kk = 1; kkMax = 5; 
-            throttleOn = sol.throttle(ii,:)>0.1; 
-            throttleOnIdx = find(throttleOn,1,'first');
-            clear idxOn idxOff
-            while (kk < kkMax) && (~isempty(throttleOnIdx))% max number of shaded regions to plot
-                idxOn(kk) = throttleOnIdx;
-                throttleOff = throttleOnIdx + find(~throttleOn(idxOn(kk):end),1,'first')-1;
-                if isempty(throttleOff)
-                    idxOff(kk) = numel(times);
-                else
-                    idxOff(kk) = throttleOff;
-                end
-                throttleOn(idxOn(kk):idxOff(kk)) = false;
-
-                % Plot arrows
-                idxs=round([idxOn(kk),(idxOn(kk)+hIdx):hIdx:(idxOff(kk)-hIdx),idxOff(kk)]);
-                plumeDir = zeros(3,numel(idxs));
-                for jj = 1:numel(idxs)
-                    idx = idxs(jj);
-                    p = sol.x(idx,8:10)';
-                    DCM_BodyToInertial = mrp2DCM(p);
-                    DCM_InertialToLVLH = DCM_InertialToRotating(solution.problemParameters.dynamics.frameRotationRate,times(idx));
-                    DCM_BodyToLVLH = DCM_InertialToLVLH*DCM_BodyToInertial;
-                    plumeDir(:,jj) = -DCM_BodyToLVLH*solution.problemParameters.dynamics.thrustDirectionBody(:,ii);
-                end
-                quiver3(sol.x(idxs,1)*1e3, sol.x(idxs,2)*1e3, sol.x(idxs,3)*1e3,...
-                    customPlot.arrowLength.*plumeDir(1,:)', ...
-                    customPlot.arrowLength.*plumeDir(2,:)', ...
-                    customPlot.arrowLength.*plumeDir(3,:)',...
-                    0,'Color',C(ii,:)',...
-                    'LineWidth',1.5,'MaxHeadSize',.15,'HandleVisibility','off')
-
-                % Find next region throttle is on 
-                throttleOnIdx = find(throttleOn,1,'first');
-                kk = kk+1;
-            end
-        end
-
-    end
-
     function ThrustConeDirection(sol,ax,useTrajColor,arrowLengthFactor)
         if nargin < 4
             arrowLengthFactor=2;
@@ -715,7 +728,6 @@ methods(Static)
     
     %% Functions specifically for 6DOF
     function InitialOrientation(solution,ax)
-        
         PlotSolution.OrientationAtTime(solution,0,ax)
         % if nargin <2 
         %     figure; ax = gca;
@@ -729,7 +741,19 @@ methods(Static)
 
     function OrientationAtTime(solution,t,ax,customPlot)
         axes(ax)
-        for ii = 1:numel(t)
+        if solution.problemParameters.dynamics.type == 'CRTBP'
+            for ii = 1:numel(t)
+                p = interpn(solution.t,solution.x(:,14:16),t(ii));
+                pos = interpn(solution.t,solution.x(:,7:9),t(ii));
+                throttle = interpn(solution.t,solution.throttle',t(ii));
+                if nargin < 4
+                    PlotSolution.PlotOrientationChaserRelativeToTranslationalFrame(p,pos*1e3,t(ii),solution.problemParameters,throttle, ax);
+                else
+                    PlotSolution.PlotOrientationChaserRelativeToTranslationalFrame(p,pos*1e3,t(ii),solution.problemParameters,throttle, ax,customPlot);
+                end
+            end
+      else 
+          for ii = 1:numel(t)
             p = interpn(solution.t,solution.x(:,8:10),t(ii));
             pos = interpn(solution.t,solution.x(:,1:3),t(ii));
             throttle = interpn(solution.t,solution.throttle',t(ii));
@@ -738,14 +762,17 @@ methods(Static)
             else
                 PlotSolution.PlotOrientationChaserRelativeToTranslationalFrame(p,pos*1e3,t(ii),solution.problemParameters,throttle, ax,customPlot);
             end
+          end
         end
     end
+    
     function [p,s] = PlotOrientationChaserRelativeToTranslationalFrame(p,pos,t,problemParameters,throttle, ax,customPlot)
         showArrows=true;
         if nargin < 7
-            cubeOpacity = .05; coneHeightFactor = 1;cubeLengthScale=1;coneOffOpacity=.2; handVis = 'on';
+            cubeOpacity = .05; coneHeightFactor = 1.2;cubeLengthScale=1.2;coneOffOpacity=.1; handVis = 'on';
         else
             if isfield(customPlot,'showArrows'), showArrows = customPlot.showArrows; end
+
             cubeOpacity = customPlot.cubeOpacity;
             coneHeightFactor = customPlot.coneHeightFactor;
             coneOffOpacity = customPlot.coneOffOpacity;
@@ -772,8 +799,15 @@ methods(Static)
         % Plot the cube
         axes(ax);
         hold on;
-        patch('Vertices',vertices,'Faces',faces,'FaceColor','k','FaceAlpha',cubeOpacity,'EdgeColor','k','LineWidth',1.5,'DisplayName','Chaser',...
-            'HandleVisibility',handVis);
+        patch(...
+          'Vertices',   vertices, ...
+          'Faces',      faces, ...
+          'FaceColor',  'k', ...
+          'FaceAlpha',  cubeOpacity, ...
+          'EdgeColor',  [0.3 0.3 0.3], ...       
+          'LineWidth',  0.5, ...                
+          'DisplayName','Chaser', ...
+          'HandleVisibility',handVis);
         % Plot the engine plume directions as small cones and label/colour them
         numEngines = problemParameters.dynamics.numEngines; 
         C = linspecer(numEngines);
@@ -787,20 +821,18 @@ methods(Static)
                 coneAng = pi/7;
             end 
             coneHeight = cubeLength/5 * coneHeightFactor;
-            %s(ii) = PlotSolution.PlotCone(ax,coneAng,C(ii,:),coneHeight,plumeDir,posEngine);
-            faceAlpha = max(coneOffOpacity,min(1,coneOffOpacity+throttle(ii)));
-            s(ii) = PlotSolution.PlotEngine(ax,C(ii,:),coneHeight,plumeDir,posEngine,faceAlpha);
+            s(ii) = PlotSolution.PlotCone(ax,coneAng,C(ii,:),coneHeight,plumeDir,posEngine);
             s(ii).DisplayName = ['Engine ',num2str(ii)];
-            s(ii).FaceAlpha = faceAlpha;
+            s(ii).FaceAlpha = max(coneOffOpacity,min(1,coneOffOpacity+throttle(ii)));
             s(ii).HandleVisibility = handVis;
             if showArrows && throttle(ii) > .6
-                arrowLength = coneHeight*3;
+                arrowLength = coneHeight*2;
                 posArrowStart = posEngine + coneHeight*plumeDir;
                 p=quiver3(posArrowStart(1), posArrowStart(2),posArrowStart(3),...
                 arrowLength.*plumeDir(1), ...
                 arrowLength.*plumeDir(2), ...
                 arrowLength.*plumeDir(3),...
-                0,'LineWidth',2,'MaxHeadSize',3,'HandleVisibility','off', ...
+                0,'LineWidth',2,'MaxHeadSize',2,'HandleVisibility','off', ...
                 'Color',C(ii,:));
             end
             %plot3(posEngine(1),posEngine(2),posEngine(3),'.','Color',C(ii,:),'HandleVisibility','off','MarkerSize',15);
@@ -1086,6 +1118,23 @@ methods(Static)
         end
     end
 
+   function hf=SixDOF_TrajCRTBP(solution)
+        hf=figure('Name','6DOF Trajectory'); grid on; hold on;
+        PlotSolution.InitialOrientation(solution,gca);
+        plot3(0,0,0,'m.','MarkerSize',20,'DisplayName','Target Location')
+        x = [solution.problemParameters.x0(1:6)';solution.problemParameters.xf']*1e3;
+        plot3(x(1,1), x(1,2), x(1,3),'bo','MarkerSize',10,'DisplayName','x_0 Chaser Initial')
+        plot3(x(end,1), x(end,2), x(end,3),'ko','MarkerSize',10,'DisplayName','x_f Chaser Final')
+        plot3(solution.x(:,7)*1e3,solution.x(:,8)*1e3,solution.x(:,9)*1e3,'DisplayName','OptimalTraj')
+    
+        if solution.problemParameters.constraint.type == POINTING_CONSTRAINT_TYPE.ORIGIN_VARIABLE_ANGLE || solution.problemParameters.constraint.type == POINTING_CONSTRAINT_TYPE.ORIGIN_CONSTANT_ANGLE
+            PlotSphereConstraint(gca,solution.problemParameters.constraint.targetRadius*1e3,[0;0;0])
+        
+        elseif solution.problemParameters.constraint.type == POINTING_CONSTRAINT_TYPE.ELLIPSOIDAL
+            PlotEllipsoidConstraint(gca,solution.problemParameters)
+        end
+   end
+
     function hf=SixDOF_Traj(solution)
         hf=figure('Name','6DOF Trajectory'); grid on; hold on;
         PlotSolution.InitialOrientation(solution,gca);
@@ -1094,10 +1143,17 @@ methods(Static)
         plot3(x(1,1), x(1,2), x(1,3),'bo','MarkerSize',10,'DisplayName','x_0 Chaser Initial')
         plot3(x(end,1), x(end,2), x(end,3),'ko','MarkerSize',10,'DisplayName','x_f Chaser Final')
         plot3(solution.x(:,1)*1e3,solution.x(:,2)*1e3,solution.x(:,3)*1e3,'DisplayName','OptimalTraj')
-    
-        if solution.problemParameters.constraint.type == POINTING_CONSTRAINT_TYPE.ORIGIN_VARIABLE_ANGLE
-            PlotSphereConstraint(gca,solution.problemParameters.constraint.targetRadius*1e3,[0;0;0])
-        end
+        
+        switch solution.problemParameters.constraint.type
+            case POINTING_CONSTRAINT_TYPE.ORIGIN_VARIABLE_ANGLE || POINTING_CONSTRAINT_TYPE.ORIGIN_CONSTANT_ANGLE
+                s = PlotSphereConstraint(gca,solution.problemParameters.constraint.targetRadius*1e3,[0;0;0]);
+                set(s,'EdgeAlpha',0);
+                title('Optimal trajectory with spherical target constraint')
+            case POINTING_CONSTRAINT_TYPE.ELLIPSOIDAL
+                s = PlotEllipsoidConstraint(gca,solution.problemParameters);
+                set(s,'EdgeAlpha',0);
+                title('Optimal trajectory with ellipsoidal target constraint')
+        end 
     end
 
     function PlumeAngleSixDOF(solutions,ax, engineNum,plotOps)
@@ -1195,6 +1251,7 @@ methods(Static)
         PlotSolution.Torque(sol,subplot(3,1,3));
     end 
 
+
     function [xVals, xLab, symb,sweepType] = DetectSweep(sols)
         N = numel(sols);
         xVals = zeros(N,1);
@@ -1226,6 +1283,7 @@ methods(Static)
             for ii = 1:N, xVals(ii) = sols(ii).problemParameters.dynamics.inertia(2,2); end 
             xLab = 'Inertia'; 
             symb = 'I';
+
         elseif any(sols(1).problemParameters.xf ~=sols(2).problemParameters.xf)
             diff=sols(1).problemParameters.xf ~=sols(2).problemParameters.xf;
             idx = find(diff,1,'first');
@@ -1335,7 +1393,9 @@ methods(Static)
         plot3(solution.x(:,1)*1e3,solution.x(:,2)*1e3,solution.x(:,3)*1e3,'DisplayName','OptimalTraj')
 
         if solution.problemParameters.constraint.type == POINTING_CONSTRAINT_TYPE.ORIGIN_VARIABLE_ANGLE
-            PlotSphereConstraint(gca,2,[0;0;0]);
+            PlotSphereConstraint(gca,2,[0;0;0])
+        elseif solution.problemParameters.constraint.type == POINTING_CONSTRAINT_TYPE.ELLIPSOIDAL
+            PlotEllipsoidConstraint(gca,problemParameters)
         end
   
         % Initialize variables
@@ -1496,4 +1556,5 @@ methods(Static)
         legend('show','Location','northeast'); 
     end
 end 
+
 end 

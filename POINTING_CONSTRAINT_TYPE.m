@@ -5,5 +5,6 @@ classdef POINTING_CONSTRAINT_TYPE < uint16
       ORIGIN_VARIABLE_ANGLE (3)
       CURVE_TWO_DIMENSIONAL (4)
       CONVEX_SOLID (5)
+      ELLIPSOIDAL (6)
    end
 end

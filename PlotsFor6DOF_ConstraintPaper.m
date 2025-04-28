@@ -1,3 +1,4 @@
+
 function PlotsFor6DOF_ConstraintPaper
 %% This function contains results generated for the 6DOF RPOD paper 
 
@@ -195,6 +196,7 @@ for ii = 1:numel(sols2plot)
     end
     PlotSolution.MassConsumption(sol(end),gca,lab,Cols(ii,:))
 end 
+
 xlabel('Time (s)'); title('');
 saveFigFcn(hf4a,saveDir);
 
@@ -424,4 +426,3 @@ PlotSolution.PlumeAngleSixDOF(sols2Plot2,ax,5);
 legend('Unconstrained',['R = ',num2str(radii(1)),'m'],['R = ',num2str(radii(2)),'m'],['R = ',num2str(radii(3)),'m'],['R = ',num2str(radii(4)),'m'],['R = ',num2str(radii(5)),'m'])
 title('Trajectories without attitude control, Engine 5 plume angle from target')
 
-end

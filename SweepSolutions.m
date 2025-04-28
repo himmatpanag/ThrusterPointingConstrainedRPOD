@@ -27,8 +27,21 @@ elseif contains(type,'epsilon')
     if dynamicStepSize
         dynamicRhoSpeedUp = true;
     end
+elseif contains(type,'kappa')
+    rate = 0.95;    
+    finalKappa = values(1);
+    N = ceil(log(finalKappa/problemParameters.dynamics.torqueCostMultiplier)/log(rate));
+    if dynamicStepSize
+        dynamicRhoSpeedUp = true;
+    end
 else 
-    N = numel(values);
+    %if ismatrix(values) && ~isvector(values)
+        % strictly 2D matrix
+        N = size(values,1);
+    %else
+        %N = numel(values);
+%end
+
 end
 
 ii=0;
@@ -81,10 +94,79 @@ while ii < N+1
             fprintf('prevValue %f\t stepSize\t%f newValue%f\t',prevValue*180/pi,stepSize*180/pi,(prevValue+stepSize)*180/pi);
         case 'Radius'
             if prevStepPass, prevValue = problemParameters.constraint.targetRadius; end             
-            targetValue = values(ii);            
+            targetValue = values(ii);             
             stepSize = (targetValue-prevValue)/(numFails+1);
             problemParameters = UpdateSphereCircleRadius(problemParameters,prevValue + stepSize);            
             fprintf('prevValue %f\t stepSize\t%f newValue%f\t',prevValue*1e3,stepSize*1e3,(prevValue+stepSize)*1e3);
+        case 'SemiAxis_x'
+            if prevStepPass, prevValue = problemParameters.constraint.targetAxisx; end                
+            targetValue = values(ii);             
+            stepSize = (targetValue - prevValue) / (numFails+1);
+            problemParameters.constraint.targetAxisx = prevValue + stepSize;          
+            fprintf('Axis X: prevValue %f\t stepSize %f\t newValue %f\t', prevValue, stepSize, (prevValue+stepSize));
+        case 'SemiAxis_y'
+            if prevStepPass, prevValue = problemParameters.constraint.targetAxisy; end                
+            targetValue = values(ii);             
+            stepSize = (targetValue - prevValue) / (numFails+1);
+            problemParameters.constraint.targetAxisy = prevValue + stepSize;          
+            fprintf('Axis Y: prevValue %f\t stepSize %f\t newValue %f\t', prevValue, stepSize, (prevValue+stepSize));
+        case 'SemiAxis_z'
+            if prevStepPass, prevValue = problemParameters.constraint.targetAxisz; end                
+            targetValue = values(ii);             
+            stepSize = (targetValue - prevValue) / (numFails+1);
+            problemParameters.constraint.targetAxisz = prevValue + stepSize;          
+            fprintf('Axis Z: prevValue %f\t stepSize %f\t newValue %f\t', prevValue, stepSize, (prevValue+stepSize));
+        case 'Ellipsoid1' % Scale all ellipsoid axes at same time and rate
+            if prevStepPass
+                prevValue = problemParameters.constraint.targetAxisx;
+                prevValuey = problemParameters.constraint.targetAxisy;
+                prevValuez = problemParameters.constraint.targetAxisz;
+            end
+            targetValue = values(ii);
+            stepSize = (targetValue-prevValue)/(numFails+1);
+            newVal = (prevValue + stepSize);
+            factorIncrease = newVal/prevValue;
+            problemParameters.constraint.targetAxisx = newVal;
+            problemParameters.constraint.targetAxisy = prevValuey*factorIncrease;
+            problemParameters.constraint.targetAxisz = prevValuez*factorIncrease;
+            fprintf('Axis X: prevValue %f\t stepSize %f\t newValue %f\t', prevValue, stepSize, (prevValue+stepSize));
+          
+        case 'Ellipsoid2' % Scale all ellipsoid axes individually toward their targets
+            if prevStepPass
+                prevValueX = problemParameters.constraint.targetAxisx;
+                prevValueY = problemParameters.constraint.targetAxisy;
+                prevValueZ = problemParameters.constraint.targetAxisz;
+
+                prevValue = prevValueX;
+            end
+        
+            targetValuex = values(ii,1);  
+            targetValuey = values(ii,2);  
+            targetValuez = values(ii,3);  
+        
+            % Compute incremental step sizes separately.
+            stepSizeX = (targetValuex - prevValueX) / (numFails + 1);
+            stepSizeY = (targetValuey - prevValueY) / (numFails + 1);
+            stepSizeZ = (targetValuez - prevValueZ) / (numFails + 1);
+            
+            % Update the constraint targets.
+            problemParameters.constraint.targetAxisx = prevValueX + stepSizeX;
+            problemParameters.constraint.targetAxisy = prevValueY + stepSizeY;
+            problemParameters.constraint.targetAxisz = prevValueZ + stepSizeZ;
+            
+            % For the overall code, use the X axis as the reference:
+            targetValue = targetValuex;
+            stepSize  = stepSizeX;
+        
+            % Diagnostics.
+            fprintf('Axis X: prevValue %f\t stepSize %f\t newValue %f\t\n', prevValueX*1e3, stepSizeX*1e3, (prevValueX + stepSizeX)*1e3);
+            fprintf('Axis Y: prevValue %f\t stepSize %f\t newValue %f\t\n', prevValueY*1e3, stepSizeY*1e3, (prevValueY + stepSizeY)*1e3);
+            fprintf('Axis Z: prevValue %f\t stepSize %f\t newValue %f\t\n', prevValueZ*1e3, stepSizeZ*1e3, (prevValueZ + stepSizeZ)*1e3);
+
+            if ii >= N
+                break
+            end
+
         case 'rho'
             if prevStepPass, prevValue = solverParameters.rho; end             
             targetValue = prevValue*rate;
@@ -131,6 +213,18 @@ while ii < N+1
             if prevStepPass && (prevValue < finalRho) && (prevValueEps < finalEps)
                 break
             end
+        case 'kappa'
+            if prevStepPass, prevValue = problemParameters.dynamics.torqueCostMultiplier; end    
+            targetValue = prevValue*rate;
+            stepSize = (targetValue-prevValue)/(numFails+1);
+            if (prevValue >= finalKappa) % only update parameters if target has not been reached
+                problemParameters.dynamics.torqueCostMultiplier = prevValue + stepSize;
+            end
+
+            if prevStepPass && (prevValue < finalKappa)
+                break
+            end
+            fprintf('prevValue %f\t stepSize\t%f newValue%f\t',prevValue,stepSize,(prevValue+stepSize));
         case 'rhokappa'
             if prevStepPass, prevValue = solverParameters.rho; prevValueKappa = problemParameters.dynamics.torqueCostMultiplier; end    
             if numel(values) > 1, finalKappa = values(2); else, finalKappa = finalRho; end
@@ -149,7 +243,33 @@ while ii < N+1
             if prevStepPass && (prevValue < finalRho) && (prevValueKappa < finalKappa)
                 break
             end
+        case 'rhoepsilonkappa'
+            if prevStepPass
+                prevValue = solverParameters.rho; 
+                prevValueKappa = problemParameters.dynamics.torqueCostMultiplier; 
+                prevValueEps = problemParameters.constraint.epsilon; 
+            end    
+            if numel(values) > 1, finalKappa = values(2); finalEps = values(3); else, finalKappa = finalRho; finalEps = finalRho; end
+            targetValue = prevValue*rate;
+            stepSize = (targetValue-prevValue)/(numFails+1);
 
+            targetValueKappa = prevValueKappa*rate;
+            stepSizeKappa = (targetValueKappa-prevValueKappa)/(numFails+1);
+            targetValueEps = prevValueEps*rate;
+            stepSizeEps = (targetValueEps-prevValueEps)/(numFails+1);
+            if (prevValueEps >= finalEps) % only update parameters if target has not been reached
+                problemParameters.constraint.epsilon = prevValueEps + stepSizeEps;
+            end
+            if (prevValueKappa >= finalKappa) % only update parameters if target has not been reached
+                problemParameters.dynamics.torqueCostMultiplier = prevValueKappa + stepSizeKappa;
+            end
+            if (prevValue >= finalRho) 
+                solverParameters.rho = prevValue + stepSize; 
+            end
+
+            if prevStepPass && (prevValue < finalRho) && (prevValueKappa < finalKappa) && (prevValueEps < finalEps)
+                break
+            end
 
         case 'ThrusterConfig' % quick and dirty implementation of thrust value 
             if prevStepPass, prevValue = problemParameters.dynamics.maxThrust(end); end             
@@ -180,13 +300,15 @@ while ii < N+1
     end     
 
     fprintf('iterIdx = %d\trho=%f\n',iter,solverParameters.rho);
-    if numel(solverParameters.initialCostateGuess) > 10
+    %if numel(solverParameters.initialCostateGuess) > 10
         if oldSweep 
             solveFunc = @OLD_Solve6DOFPointingConstrainedControlProblem;
+        elseif strcmp(solution.problemParameters.dynamics.type, 'CRTBP')
+            solveFunc = @Solve6DOFPointingConstrainedControlProblemCRTBP;
         else
             solveFunc = @Solve6DOFPointingConstrainedControlProblem;
         end
-        if solverParameters.rho < .01
+        if (solverParameters.rho < .2) || (strcmp(type,'Radius')) || (strcmp(type,'kappa')) || (strcmp(type,'Ellipsoid1')) || (strcmp(type,'Ellipsoid2'))
             solverParameters.fSolveOptions.MaxIterations = 30;
         else
             solverParameters.fSolveOptions.MaxIterations = 300;
@@ -196,9 +318,9 @@ while ii < N+1
         % 'MaxIter',3e1,'TolFun',1e-12,'TolX',1e-12,'StepTolerance',1e-12,...
         % 'UseParallel',true); % fsolve    
     
-    else 
-        solveFunc = @SolvePointingConstrainedControlProblem;
-    end 
+    %else 
+        %solveFunc = @SolvePointingConstrainedControlProblem;
+    %end 
     if iter > 1 && isfield(solution,'finalStateError') 
         % compare two different costate guesses - use smoothness of the
         % homotopy paths to pick a new costate guess based on previous step
@@ -209,23 +331,32 @@ while ii < N+1
             guess2 = newSols(iter).newCostateGuess + (newSols(iter).newCostateGuess-newSols(iter-1).newCostateGuess)*norm(stepSize)/norm(prevPassedStepSize);
             solverParameters.initialCostateGuess = guess2;
             sol2 = solveFunc(problemParameters,solverParameters,true);
-            if norm(sol1.finalStateError) < norm(sol2.finalStateError)
+            if nosrm(sol1.finalStateError) < norm(sol2.finalStateError)
                 solverParameters.initialCostateGuess = guess1;
             end
         end
     end 
 
-    solution = solveFunc(problemParameters,solverParameters);
+    solution = solveFunc(problemParameters,solverParameters); 
 
     debug = false; 
     if debug % Put a breakpoint in here to plot latest solutions
         sol = newSols(end-1);
         PlotSolution.ConvergedCostateTrace(newSols(1:(end-1)))
         PlotSolution.RotationalSummary(sol); PlotSolution.ThrustProfileAllEngines(sol)
+        PlotSolution.SixDOF_Traj(sol)
+        PlotSolution.PlotOrientationChaserRelativeToTranslationalFrame(sol.x(end,8:10)',sol.x(end,1:3)'*1e3,sol.t(end),sol.problemParameters,gca)
+
     end
 
     if isfield(solution,'finalStateError')
-        solPass = (norm(solution.finalStateError)<1e-8)|| ( ~any(~solution.solutionFound));
+        costateDelta = solution.newCostateGuess-newSols(iter).newCostateGuess;
+        [maxVal,maxIdx] = max(abs(costateDelta));
+        maxPctChange = maxVal./abs(newSols(iter).newCostateGuess(maxIdx))* 100;
+        costateDeltaNorm = norm(costateDelta);
+        solPass = (norm(solution.finalStateError)<1e-7) || ...
+            ((norm(solution.finalStateError)<1e-5) && ( ~any(~solution.solutionFound)));% || ...
+            %((norm(solution.finalStateError)<1e-4) && (costateDeltaNorm < 1e-2) && maxPctChange < 0.05);
     else
         solPass = ~any(~solution.solutionFound);
     end

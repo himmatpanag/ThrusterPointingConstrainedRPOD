@@ -1,9 +1,9 @@
-function solution = Solve6DOFPointingConstrainedControlProblem(problemParameters, solverParameters, skipSol)
-    % Author: Himmat Panag
-    % Solves a single instance of the 6DOF Optimal Control Problem
+function solution = Solve6DOFPointingConstrainedControlProblemCRTBP(problemParameters, solverParameters, skipSol) %Done with CRTBP
+    % Author: Marin Hubert
+    % Solves a single instance of the 6DOF Optimal Control Problem with
+    % CRTBP dynamics
     % Not allowed to point at the origin
-    % TODO: Turn this into a mex file
-    % Date: 18 Oct 2024
+    % Date: 16 Apr 2025
     if nargin < 3, skipSol = false; end
     if isempty(gcp), parpool(8); end
     problemParameters.dynamics.finalT = solverParameters.tSpan(end);
@@ -14,7 +14,7 @@ function solution = Solve6DOFPointingConstrainedControlProblem(problemParameters
     else
         [lam0,~,exitFlag] = fsolve(@costFunction,initialGuess,...
             solverParameters.fSolveOptions,...
-            solverParameters.tSpan, problemParameters.x0, problemParameters.xf,...
+            solverParameters.tSpan, problemParameters.xT0, problemParameters.x0, problemParameters.xf,...
             problemParameters.p0,problemParameters.pf,...
             problemParameters.w0,problemParameters.wf,...
             solverParameters.rho,...
@@ -28,7 +28,7 @@ function solution = Solve6DOFPointingConstrainedControlProblem(problemParameters
         [initialGuess,remainingCostates] = ChooseCostatesToIgnore( ...
             problemParameters.dynamics, solution.newCostateGuess);
         optimalTraj = costFunction(initialGuess,...            
-            solverParameters.tSpan, problemParameters.x0, problemParameters.xf,...
+            solverParameters.tSpan, problemParameters.xT0, problemParameters.x0, problemParameters.xf,...
             problemParameters.p0,problemParameters.pf,...
             problemParameters.w0,problemParameters.wf,...
             solverParameters.rho,...
@@ -41,7 +41,7 @@ function solution = Solve6DOFPointingConstrainedControlProblem(problemParameters
         solution.solutionFound = exitFlag>0;
         solution.finalStateError = error;
         if problemParameters.dynamics.sundman.useTransform
-            solution.t = optimalTraj.X(:,27); %%Change for CRTBP
+            solution.t = optimalTraj.X(:,39); 
             solution.simTime = optimalTraj.t;
         else
             solution.t = optimalTraj.t;
@@ -77,11 +77,11 @@ function [initialGuess,remainingCostates] = ChooseCostatesToIgnore(dynamics, cos
         % the solver easily converges to the optimal solution
         
         if (dynamics.sundman.useTransform) && (~dynamics.sundman.useSimplified)
-            initialGuess = costateGuess([1:7,14]);
-            remainingCostates =  costateGuess(8:13);
+            initialGuess = costateGuess([1:13,20]);
+            remainingCostates =  costateGuess(14:19);
         else
-            initialGuess = costateGuess(1:7);
-            remainingCostates =  costateGuess(8:end);
+            initialGuess = costateGuess(1:13);
+            remainingCostates =  costateGuess(14:end);
         end
     else 
         initialGuess = costateGuess;
@@ -92,7 +92,7 @@ end
 function lam0 = CombineIgnoredCostates(dynamics, costateGuess, costatesToIgnore)
     if (dynamics.engineConfiguration==THRUSTER_CONFIGURATION.CG_ALIGNED_6 || dynamics.engineConfiguration==THRUSTER_CONFIGURATION.CG_ALIGNED_CANTED_8) && (dynamics.attitudeActuator==ATTITUDE_CONTROL_TYPE.NONE)
         if (dynamics.sundman.useTransform) && (~dynamics.sundman.useSimplified)
-            lam0 = [costateGuess(1:7);costatesToIgnore;costateGuess(end)];
+            lam0 = [costateGuess(1:13);costatesToIgnore;costateGuess(end)];
         else
             lam0 = [costateGuess;costatesToIgnore];
         end
@@ -105,20 +105,23 @@ function Xdot = SixDimConstrainedOptimalControlProblem(t,X,dynamics,rho,constrai
 if nargin < 6
     returnDynamics = true;
 end
-    % states 1-6 are pos vel
-    % state 7 is mass
-    % states 8-13 are MRP and angular velocity
-    % states 14-26 are corresponding costates. (14-19 pos vel, 20 mass,
-    % 21-26 angular)
-    pos = X(1:3);
-    m = X(7);
-    p = X(8:10);
-    w = X(11:13);
-    lambda_v = X(17:19);
-    lambda_m = X(20);
-    lambda_w = X(24:26);
+    % states 1-6 are pos vel of target
+    % states 7-12 are rel pos vel of spacecraft
+    % state 13 is mass
+    % states 14-19 are MRP and angular velocity
+    % states 20-38 are corresponding costates. (20-31 pos vel target/rel, 32 mass,
+    % 33-38 angular)
+    pos_T = X(1:3);
+    pos = X(7:9);
+    m = X(13);
+    p = X(14:16);
+    w = X(17:19);
+    lambda_v_T = X(23:25);
+    lambda_v = X(29:31);
+    lambda_m = X(32);
+    lambda_w = X(36:38);
     if dynamics.sundman.useTransform
-        t = X(27); 
+        t = X(39); 
     end 
 
     p2 = p'*p;
@@ -126,7 +129,7 @@ end
     temp = (1+p2)^2;
     D_Temp = lambda_w'*dynamics.inertiaInverse; % cross product is bilinear so product rule distributes
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
-    % Translational dynamics are in a rotating reference frame
+    % Translational and CRTBP dynamics are in a rotating reference frame
     D = eye(3) + (8*pCross*pCross - 4*(1-p2)*pCross)/temp;
     G = [cos(dynamics.frameRotationRate*t) sin(dynamics.frameRotationRate*t) 0;
                           -sin(dynamics.frameRotationRate*t) cos(dynamics.frameRotationRate*t) 0;
@@ -171,9 +174,6 @@ end
             
             % Compute ellipsoid matrix A
             A = U * sigma * U';
-
-            % Compute anchor point and direction in LVLH frame.
-            x0 = (pos + Phi*d) - c0_target;
             
             % Formulate the quadratic equation: (x0 - t*d)' * A * (x0 - t*d) = 1.
             a = (Phi*u)' * A * (Phi*u);
@@ -183,9 +183,9 @@ end
             rB = Phi'*A'*((pos+Phi*d)-c0_target);
             
             if rB'*u >= 0
-                constraintFunc(ii) = (-(b^2)+4*a*c)*a1^2; % -Delta, if positive then constraint not violated, eta = 1, Scaled by semi axis squared
+                constraintFunc(ii) = (-(b^2)+4*a*c)*a1^2.5; % -Delta, if positive then constraint not violated, eta = 1, Scaled by semi axis squared
             else
-                constraintFunc(ii) = (4*a*c)*a1^2; % -Delta, smoothed function so that a1, Scaled by semi axis squared
+                constraintFunc(ii) = (4*a*c)*a1^2.5; % -Delta, smoothed function so that a1, Scaled by semi axis squared
             end
             eta(ii) = 1/2 * (1 + tanh(constraintFunc(ii)/constraint.epsilon));
             etaPrime(ii) = 1/(2*constraint.epsilon)*(1-(tanh(constraintFunc(ii)/constraint.epsilon))^2);
@@ -222,14 +222,34 @@ end
     end
 
     % Compute the state and costate dynamics
-    switch dynamics.type
-        case 'Linear' % xDot = Ax + B*Thrust, B = [0x3,Ix3];
-            fDynamics = dynamics.A*X(1:6);                    
-        % case 'CRTBP' %Xdot = Non-linear
-        %     %fdynamics = 
-        %     %fdynamics = ... 
+    switch dynamics.type                  
+        case 'CRTBP' %Xdot = Non-linear
+            x_SunL2 = dynamics.x1shift;
+            x_EarthL2 = dynamics.x2shift;
+
+            r1T = [X(1)+x_SunL2; X(2); X(3)]; %dynamics.x_sun-L2
+            r2T = [X(1)+x_EarthL2; X(2); X(3)]; %dynamics.x_earth-L2
+            mu_1 = dynamics.mu_1; %Sun
+            mu_2 = dynamics.mu_2; %Earth
+            x_OL2 =dynamics.x_OL2 ; % distance barycenter to L2
+            W = dynamics.frameRotationRate;
+
+            fDynamics_target = [X(4); X(5); X(6); 
+                2*W*X(5)+((W^2)*X(1)*x_OL2) - (mu_1*((r1T(1))/(norm(r1T)^3))) - (mu_2*(r2T(1)/(norm(r2T)^3)));...
+                -2*W*X(4)+((W^2)*X(2)) - (mu_1*(r1T(2)/(norm(r1T)^3))) - (mu_2*(r2T(2)/(norm(r2T)^3)));...
+                - (mu_1*(r1T(3)/(norm(r1T)^3))) - (mu_2*(r2T(3)/(norm(r2T)^3)))];
+
+
+            fDynamics = [X(10); X(11); X(12); 
+                2*W*X(11)+((W^2)*X(7)) + (mu_1*(((r1T(1))/(norm(r1T)^3))-((r1T(1)+X(7))/(norm(r1T+pos)^3))))+(mu_2*(((r2T(1))/(norm(r2T)^3))-((r2T(1)+X(7))/(norm(r2T+pos)^3))));...
+                -2*W*X(10)+((W^2)*X(8)) + (mu_1*(((r1T(2))/(norm(r1T)^3))-((r1T(2)+X(8))/(norm(r1T+pos)^3))))+(mu_2*(((r2T(2))/(norm(r2T)^3))-((r2T(2)+X(8))/(norm(r2T+pos)^3))));...
+                (mu_1*(((r1T(3))/(norm(r1T)^3))-((r1T(3)+X(9))/(norm(r1T+pos)^3))))+(mu_2*(((r2T(3))/(norm(r2T)^3))-((r2T(3)+X(9))/(norm(r2T+pos)^3))))
+            ];
+            
     end
 
+    rDot_T = fDynamics_target(1:3);
+    vDot_T = fDynamics_target(4:6);
     rDot = fDynamics(1:3);
     vDot = fDynamics(4:6) + totalThrustLVLH/m;  
     B_Temp = 0.25 * ((1 + p2) .* eye(3) + 2 * (pCross*pCross + pCross));
@@ -242,16 +262,18 @@ end
     %     subplot(3,2,ii+3); plot(t,E_r(ii),'.','HandleVisibility','off'); hold on; grid on;
     % end
     
-    H = H + X(14:16)'*rDot + lambda_v'*vDot + ...
-        lambda_m*mDot + X(21:23)'*pDot + lambda_w'*omegaDot;
+    H = H + X(20:22)'*rDot_T + lambda_v_T'*vDot_T + X(26:28)'*rDot + lambda_v'*vDot + ...
+        lambda_m*mDot + X(33:35)'*pDot + lambda_w'*omegaDot;
+ 
+
     if returnDynamics
         if dynamics.sundman.useTransform
             timeDilationTerms = 1-dynamics.sundman.theta.*exp(-SwitchFunctions.^2);
             tPrime = prod(timeDilationTerms);
             if dynamics.sundman.useSimplified
-                Xdot = [rDot; vDot; mDot; pDot; omegaDot;lambdaDot;1].*tPrime;
+                Xdot = [rDot_T; vDot_T; rDot; vDot; mDot; pDot; omegaDot;lambdaDot;1].*tPrime;
             else
-                lambda_t = X(28);
+                lambda_t = X(40);
                 tPrimeProdExcept_ith = tPrime./timeDilationTerms;
                 dtPrimedp = [0;0;0]; dtPrimedr = [0;0;0];
                 dtPrimedt = 0; dtPrimedm = 0;
@@ -272,18 +294,22 @@ end
                     dtPrimedm = dtPrimedm + coeff_dSdx * dynamics.exhaustVelocity/(m^2)*eta(ii)*lpu;
                 end
                 lambda_tPrime = -H*dtPrimedt - dH_olddt*tPrime;
-                lambda_rPrime = lambdaDot(1:3).*tPrime + H*dtPrimedr;
-                lambda_vPrime = lambdaDot(4:6).*tPrime;
-                lambda_mPrime = lambdaDot(7).*tPrime + H*dtPrimedm;
-                lambda_pPrime = lambdaDot(8:10).*tPrime + H*dtPrimedp;
-                lambda_wPrime = lambdaDot(11:13).*tPrime;
                 
-                Xdot = [rDot.*tPrime; vDot.*tPrime; mDot.*tPrime; pDot.*tPrime; omegaDot.*tPrime;
+                % lambda_rTPrime = lambdaDot(1:3).*tPrime + H*dtPrimedr;
+                % lambda_vTPrime = lambdaDot(4:6).*tPrime; 
+                lambda_rPrime = lambdaDot(7:9).*tPrime + H*dtPrimedr;
+                lambda_vPrime = lambdaDot(10:12).*tPrime;
+                lambda_mPrime = lambdaDot(13).*tPrime + H*dtPrimedm;
+                lambda_pPrime = lambdaDot(14:16).*tPrime + H*dtPrimedp;
+                lambda_wPrime = lambdaDot(17:19).*tPrime;
+                
+                Xdot = [
+                    rDot.*tPrime; vDot.*tPrime; mDot.*tPrime; pDot.*tPrime; omegaDot.*tPrime;
                     lambda_rPrime; lambda_vPrime; lambda_mPrime; lambda_pPrime; lambda_wPrime;
                     tPrime; lambda_tPrime];
             end 
         else
-            Xdot = [rDot; vDot; mDot; pDot; omegaDot;lambdaDot];...
+            Xdot = [rDot_T; vDot_T; rDot; vDot; mDot; pDot; omegaDot; lambdaDot];
         end 
     else % For constructing the solution structure. 
         % Return the switch functions, constraints, throttles, anything else you want to log.
@@ -305,7 +331,7 @@ function [lpu_t,lpu_p] = SundmanDerivatives(t,u1,u2,u3,p1,p2,p3,lambda_v1,lambda
             ];
 end
 
-function trajOut = costFunction(lam0_guess,tspan, x0, xf, p0, pf, ...
+function trajOut = costFunction(lam0_guess,tspan, xT0, x0, xf, p0, pf, ...
     w0, wf,rho,constraint,dynamics,costatesToIgnore,opts_ode,getSol)
     
     lambda_0 = CombineIgnoredCostates(dynamics, lam0_guess, costatesToIgnore); 
@@ -314,12 +340,12 @@ function trajOut = costFunction(lam0_guess,tspan, x0, xf, p0, pf, ...
         opts_ode = odeset(opts_ode, Event=@BothEvents);
         tspan = tspan*2000; 
         if dynamics.sundman.useSimplified
-            X0 = [x0; p0; w0;lambda_0;0];
+            X0 = [xT0; x0; p0; w0;lambda_0;0];
         else 
-            X0 = [x0; p0; w0;lambda_0(1:(end-1));0;lambda_0(end)];
+            X0 = [xT0; x0; p0; w0;lambda_0(1:(end-1));0;lambda_0(end)];
         end
     else
-        X0 = [x0; p0; w0;lambda_0];
+        X0 = [xT0; x0; p0; w0; lambda_0]; %added m0 here, have to ask Himmat+added problemParameters.initialMass,... before calling cost function
         opts_ode = odeset(opts_ode, Event=@MRP_InShadowSet);
     end
     useShadowSet = true;
@@ -352,7 +378,7 @@ function trajOut = costFunction(lam0_guess,tspan, x0, xf, p0, pf, ...
         end
     else
         [t,X] = ode45(@SixDimConstrainedOptimalControlProblem,...
-            tspan,[x0; p0; w0;lambda_0],opts_ode,dynamics,rho,constraint);
+            tspan,[xT0; x0; p0; w0;lambda_0],opts_ode,dynamics,rho,constraint);
     end
     % states 1-6 are pos vel
     % state 7 is mass
@@ -365,10 +391,10 @@ function trajOut = costFunction(lam0_guess,tspan, x0, xf, p0, pf, ...
     else
         xODE_Final = X(end,:);
     end
-    normOriginal = norm(xODE_Final(8:10)-pf');
-    MRP_Error = xODE_Final(8:10)-pf';
+    normOriginal = norm(xODE_Final(14:16)-pf');
+    MRP_Error = xODE_Final(14:16)-pf';
     if normOriginal > 0.2 % stop switching errors
-        shadowX_Final = -xODE_Final(8:10)/(norm(xODE_Final(8:10))^2);
+        shadowX_Final = -xODE_Final(14:16)/(norm(xODE_Final(14:16))^2);
         if normOriginal > norm(shadowX_Final-pf')
             MRP_Error = shadowX_Final-pf';
         end
@@ -382,12 +408,16 @@ function trajOut = costFunction(lam0_guess,tspan, x0, xf, p0, pf, ...
     MRP_Scale = 1e-6/.0044;
     omega_Scale = 1e-6/(8.7266e-04);
     if dynamics.finalAttitudeFree
-        MRP_Error = xODE_Final(21:23); % costates = 0 
+        MRP_Error = xODE_Final(33:35); % costates = 0 
         MRP_Scale = 1;
     end
+    %scale = 100.*[1,1,1,velScale,velScale,velScale,MRP_Scale,MRP_Scale,MRP_Scale,...
+        %omega_Scale,omega_Scale,omega_Scale,1];
     scale = 100.*[1,1,1,velScale,velScale,velScale,MRP_Scale,MRP_Scale,MRP_Scale,...
-        omega_Scale,omega_Scale,omega_Scale,1];
-    errorUnscaled = [xODE_Final(1:6)-xf',MRP_Error,xODE_Final(11:13)-wf',xODE_Final(20)]; 
+        omega_Scale,omega_Scale,omega_Scale,1,1,1,1,1,1,1];
+    errorUnscaled = [xODE_Final(7:12)-xf',MRP_Error,xODE_Final(17:19)-wf',xODE_Final(20:25),xODE_Final(32)]; 
+    % Want costates on final target pos,vel to be 0; want final costate for
+    % mass 0
     err = errorUnscaled.*scale;
 
     if getSol 
@@ -406,7 +436,7 @@ function [value,isterminal,direction] = BothEvents(t,X,dynamics,rho,constraint)
     direction = [direction1,direction2];
 end
 function [value,isterminal,direction] = FinalTimeReachedEvent(t,X,dynamics,rho,constraint)
-    value = X(27) - dynamics.finalT;
+    value = X(39) - dynamics.finalT;
     if value > 0
         stop = true;
     end
@@ -415,7 +445,7 @@ function [value,isterminal,direction] = FinalTimeReachedEvent(t,X,dynamics,rho,c
 end
 
 function [value,isterminal,direction] = MRP_InShadowSet(~,X,dynamics,rho,constraint)
-    value = norm(X(8:10))-1-0.5; % norm goes over 1.5
+    value = norm(X(14:16))-1-0.5; % norm goes over 1.5
     isterminal = 1;
     direction = 1;
 end

@@ -1,4 +1,4 @@
-youfunction PlotsFor6DOF_ConstraintPaper
+%youfunction PlotsFor6DOF_ConstraintPaper
 % This function contains results generated for 6DOF RPOD. 
 parallelFSolveOptions = optimoptions('fsolve','Display','iter','MaxFunEvals',1e3,...
     'MaxIter',3e1,'TolFun',1e-12,'TolX',1e-11,...
@@ -20,7 +20,7 @@ while any(~solutionCG_AlignedUnconstrained.solutionFound)
     solutionCG_AlignedUnconstrained = Solve6DOFPointingConstrainedControlProblem(problemParameters,solverParameters);
     % unconstrainedInitialRho = PlotSolution.summary(solution);
 end 
-solutionCG_AlignedUnconstrained = NEW_Solve6DOFPointingConstrainedControlProblem(problemParameters,solverParameters);
+%solutionCG_AlignedUnconstrained = NEW_Solve6DOFPointingConstrainedControlProblem(problemParameters,solverParameters);
 
 UnconstrainedShortTimeRhoSweep = SweepSolutions(solutionCG_AlignedUnconstrained,'rho',1e-4,true);
 solutionCG_AlignedUnconstrainedSmallRho = RerunSolution(UnconstrainedShortTimeRhoSweep(end));
@@ -385,4 +385,3 @@ solverParameters3DOF.initialCostateGuess =  [-0.000061909304126   1.683061783958
 solution3DOF = SolvePointingConstrainedControlProblem(problemParameters3DOF,solverParameters3DOF);
 solution3DOF = RerunSolution(solution3DOF);
 
-end

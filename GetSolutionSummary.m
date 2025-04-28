@@ -23,10 +23,11 @@ switch solution.problemParameters.constraint.type
         summary.title = ['Circular Segment Radius ',num2str(solution.problemParameters.constraint.curve.parametricRadial(1))];        
         summary.constraintString = ['Mirror Radius ',num2str(solution.problemParameters.constraint.curve.parametricRadial(1))];
     case POINTING_CONSTRAINT_TYPE.ELLIPSOIDAL
-        if strcmp(solution.problemParameters.dynamics.type,'CRTBP')
-            semi-major_axis = [solution.problemParameters.constraint.
-        end
-
+        summary.constraintString = ['Ellipsoidal Constraint',num2str(solution.problemParameters.constraint.targetAxisx)];
+        summary.title = ['Ellipsoidal Constraint'];
+        % if strcmp(solution.problemParameters.dynamics.type,'CRTBP')
+        %     semi-major_axis = [solution.problemParameters.constraint.
+        % end
 end 
 
 end 

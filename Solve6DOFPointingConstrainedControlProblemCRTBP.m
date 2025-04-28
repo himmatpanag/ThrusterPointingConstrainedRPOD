@@ -255,7 +255,13 @@ end
     B_Temp = 0.25 * ((1 + p2) .* eye(3) + 2 * (pCross*pCross + pCross));
     pDot = B_Temp * w; % Testing pdot %pDot2 = .5 * (.5*(1-p2)*eye(3) + pCross + p*p')*w
     omegaDot = dynamics.inertiaInverse*(totalTorque+  optimalControlTorque - cross(w,dynamics.inertia*w));
-    [lambdaDot, E_p, E_r, E_t] = CostateDerivativesSymbolic6DOF(t,X,dynamics,delta,Phi,eta,etaPrime,constraint);
+    %[lambdaDot, E_p, E_r, E_t] = CostateDerivativesSymbolic6DOF(t,X,dynamics,delta,Phi,eta,etaPrime,constraint);
+
+    if constraint.type == POINTING_CONSTRAINT_TYPE.ELLIPSOIDAL
+        [lambdaDot, E_p, E_r, E_t] = CostateDerivativesSymbolic6DOFEllipsoidal(t,X,dynamics,delta,Phi,eta,etaPrime,constraint);
+    else
+        [lambdaDot, E_p, E_r, E_t] = CostateDerivativesSymbolic6DOF(t,X,dynamics,delta,Phi,eta,etaPrime,constraint);
+    end 
     
     % gcf; for ii = 1:3
     %     subplot(3,2,ii); plot(t,E_p(ii),'.','HandleVisibility','off'); hold on; grid on;

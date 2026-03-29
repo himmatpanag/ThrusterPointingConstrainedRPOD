@@ -170,12 +170,12 @@ saveFigFcn(hf3Quad2,saveDir)
 
 %% Mass consumption figures
 hf4 = figure('Name','MassConsumptionAll'); grid on; hold on; 
-PlotSolution.MassConsumption(solutionCG_Aligned_Constrained2SmallEps_RhoSweep(end),gca,'Constrained, Without Attitude Control, Fixed Final Orientation')
-PlotSolution.MassConsumption(solCG6_R2_TorqueRho(end),gca,'Constrained, With Attitude Control, Fixed Final Orientation')
-PlotSolution.MassConsumption(sol6DOF,gca,'Constrained, With Attitude Control, Free Final Orientation')
+PlotSolution.MassConsumption(solutionCG_Aligned_Constrained2SmallEps_RhoSweep(end),gca,'Constrained, Without Attitude Control')
+PlotSolution.MassConsumption(solCG6_R2_TorqueRho(end),gca,'Constrained, Terminal Attitude Fixed')
+PlotSolution.MassConsumption(sol6DOF,gca,'Constrained, Terminal Attitude Free')
 %PlotSolution.MassConsumption(solutionCG_AlignedUnconstrainedrhoSweep(end),gca,'Unconstrained, Without Attitude Control, Fixed Final Orientation')
+PlotSolution.MassConsumption(rhoKappaSweepCG_Aligned_ControlTorque(end),gca,'Unconstrained')
 PlotSolution.MassConsumption(sol3DOF(end),gca,'Constrained 3DOF, (No Attitude Rate Limits)')
-PlotSolution.MassConsumption(rhoKappaSweepCG_Aligned_ControlTorque(end),gca,'Unconstrained, With Attitude Control, Fixed Final Orientation')
 xlabel('Time (s)'); title('');
 saveFigFcn(hf4,saveDir);
 
@@ -271,6 +271,68 @@ xlim([-4,4]); ylim([-4,10.5])
 hf6.Position = [1 1 1015 697];legend('show','Location','east'); 
 saveFigFcn(hf6,saveDir); 
 
+%% Animate figure above
+open([saveDir,'/6DOF_Trajectories_NoAttitudeControl.fig']);
+h = gcf; ii = 1;
+rads = [3,2.5,1.5,1,.48]*1e-3;
+for idx = 5:-1:1
+    sols2Plot(ii).x =  [h.Children(2).Children(idx).XData;h.Children(2).Children(idx).YData;h.Children(2).Children(idx).ZData]';
+    sols2Plot(ii).problemParameters.constraint.targetRadius = rads(idx);
+    ii=ii+1;
+end
+
+hf6Anim = figure('Name','6DOF_Trajectories_NoAttitudeControlAnimate'); grid on; hold on;
+ax = gca;
+sol = solutionCG_AlignedUnconstrainedrhoSweep(end);
+x = sol.x*1e3;
+numFrames = numel(sols2Plot)+1;
+frames(numFrames) = struct('cdata', [], 'colormap', []);
+
+plot3(0,0,0,'m.','MarkerSize',20,'DisplayName','Target Location')
+plot3(x(1,1), x(1,2), x(1,3),'bo','MarkerSize',10,'LineWidth',2,'DisplayName','Chaser Initial')
+plot3(x(end,1), x(end,2), x(end,3),'bx','MarkerSize',13,'LineWidth',2,'DisplayName','Chaser Final')
+plot3(sol.x(:,1)*1e3,sol.x(:,2)*1e3,sol.x(:,3)*1e3,'Color',C(jj,:),'LineWidth',2,'DisplayName','Unconstrained');
+%sols2Plot = sols2Plot([5:-1:1]);
+C = GetColors(numel(sols2Plot)+1);
+jj=1;
+xlabel('Radial (m)'); ylabel('Along Track (m)'); 
+ax.View = [90,90]; axis equal
+xlim([-4,4]); ylim([-4,10.5])
+hf6Anim.Position = [61         151        1015         697];
+for sol = sols2Plot
+    l = legend('show','Location','southeast'); 
+    l.Position = [0.7191 0.2192 0.1724 0.2825];
+    frames(jj) = getframe(hf6Anim);
+    jj=jj+1;
+    plot3(sol.x(:,2),sol.x(:,1),sol.x(:,3),'Color',C(jj,:),'LineWidth',2,'DisplayName',['R = ',num2str(sol.problemParameters.constraint.targetRadius*1e3),'m']);
+    ReduceColorOrderIndex(ax);
+    % Plot circle of radius targetRadius
+    if jj==2
+        p = patch(1e3*sol.problemParameters.constraint.targetRadius*cos(0:0.01:2*pi),1e3*sol.problemParameters.constraint.targetRadius*sin(0:0.01:2*pi),C(jj,:),'FaceAlpha',0,'HandleVisibility','off','LineWidth',1,...
+        'EdgeColor',C(jj,:));
+        r2=1e3*sol.problemParameters.constraint.targetRadius;
+    else
+        r1=r2;
+        r2=1e3*sol.problemParameters.constraint.targetRadius;
+        p = PlotSolution.Annulus(r1,r2,C(jj,:));
+        p.FaceAlpha = 0; %p.LineStyle="none";
+    end
+    H=hatchfill(p,'single',jj*65,15); H.Color = C(jj,:); H.HandleVisibility = 'off';
+end
+frames(jj) = getframe(hf6Anim);
+
+hf6Anim.Visible = 'on';
+movie(hf6Anim, frames, 1, 1); % Play the movie
+
+% Save the animation as a video file
+videoWriter = VideoWriter('NoControlTorqueAnimation', 'MPEG-4');
+videoWriter.FrameRate = 1; % Set the frame rate
+open(videoWriter);
+writeVideo(videoWriter, frames);
+close(videoWriter);
+
+disp('Video saved as NoControlTorqueAnimation.mp4');
+
 %% Animation
 PlotSolution.SixDOF_Traj_Animated(solutionCG_Constraint2CheaperTorque_Sr_Se(end))
 
@@ -319,11 +381,11 @@ saveFigSeparateAxes(hf8,saveDir);
 sol = solCG6_R3_TorqueRho(end);
 hf9 = figure('Name','Costates_R3'); 
 stateLabels = PlotSolution.GetStateLabels(sol);
-subplot(2,2,1); for ii = [13+[1,2,4,5]], plot(sol.t,sol.x(:,ii),"DisplayName",stateLabels{ii},'LineWidth',2); hold on; grid on; end, legend('show','Location','best'); xlabel('Time (s)')
-subplot(2,2,3);for ii = [13+[3,6]], plot(sol.t,sol.x(:,ii),"DisplayName",stateLabels{ii},'LineWidth',2); hold on; grid on; end, legend('show','Location','northwest'); xlabel('Time (s)')
-subplot(2,2,4);for ii = [13+[8,9,11,12]], plot(sol.t,sol.x(:,ii),"DisplayName",stateLabels{ii},'LineWidth',2); hold on; grid on; end, legend('show','Location','best'); xlabel('Time (s)')
-subplot(2,2,2);for ii = [13+[7,10,13]], plot(sol.t,sol.x(:,ii),"DisplayName",stateLabels{ii},'LineWidth',2); hold on; grid on; end, legend('show','Location','best'); xlabel('Time (s)')
-MagInset(hf9,subplot(2,2,3), [34,34.5,1.2e-15,2e-15],[22,47,-12e-14,-6e-14],{'SE','NE'});
+subplot(2,2,1); for ii = [13+[1,2,4,5]], plot(sol.t,sol.x(:,ii),"DisplayName",stateLabels{ii},'LineWidth',2); hold on; grid on; end, legend('show','Location','best'); xlabel('Time (s)'); ylabel('\lambda'); xlim([0,50])
+subplot(2,2,3);for ii = [13+[3,6]], plot(sol.t,sol.x(:,ii),"DisplayName",stateLabels{ii},'LineWidth',2); hold on; grid on; end, legend('show','Location','northwest'); xlabel('Time (s)'); ylabel('\lambda'); xlim([0,50])
+subplot(2,2,4);for ii = [13+[8,9,11,12]], plot(sol.t,sol.x(:,ii),"DisplayName",stateLabels{ii},'LineWidth',2); hold on; grid on; end, legend('show','Location','best'); xlabel('Time (s)'); ylabel('\lambda'); xlim([0,50])
+subplot(2,2,2);for ii = [13+[7,10,13]], plot(sol.t,sol.x(:,ii),"DisplayName",stateLabels{ii},'LineWidth',2); hold on; grid on; end, legend('show','Location','best'); xlabel('Time (s)'); ylabel('\lambda'); xlim([0,50])
+MagInset(hf9,subplot(2,2,3), [34,34.5,1.2e-15,2e-15],[22,47,-12e-14,-6e-14],{'NE','NE'});
 saveFigFcn(hf9,saveDir); 
 saveFigSeparateAxes(hf9,saveDir); 
 

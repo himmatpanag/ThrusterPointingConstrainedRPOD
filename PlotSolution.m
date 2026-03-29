@@ -446,14 +446,14 @@ methods(Static)
     function MassConsumption(solution,ax,dispName, col)
         if nargin<3, summary = GetSolutionSummary(solution); dispName = summary.constraintString; end 
         axes(ax); grid on; hold on; title('Fuel consumption')
-        if nargin < 4, t = colororder; col = t(ax.ColorOrderIndex-1,:); end
+        if nargin < 4, t = colororder; col = t(ax.ColorOrderIndex,:); end
         xlabel('Time (s)'); ylabel('Fuel consumption (g)')        
         
         massConsumption = -1000*(solution.x(:,7)-solution.x(1,7));
         plot(solution.t,massConsumption,'Color',col,'LineWidth',2,'DisplayName',dispName);
         legend('show',  'Location','best'); 
         t2=text(solution.t(end),(massConsumption(end)),['\leftarrow',num2str(round(massConsumption(end))), ...
-            'g'],'Color',col,'FontSize',12,'HorizontalAlignment','left');
+            'g'],'Color',col,'FontSize',20,'HorizontalAlignment','left');
 
     end 
 

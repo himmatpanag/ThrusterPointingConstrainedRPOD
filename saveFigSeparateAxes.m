@@ -15,7 +15,7 @@ kk=0;
             kk = kk+1;
             ax=h.Children(ii);
             exportgraphics(ax,[h.Name,'ax',num2str(kk),'.png'],...
-                'Resolution',400);
+                'Resolution',500);
         end
     end 
 cd(od);

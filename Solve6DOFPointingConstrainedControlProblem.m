@@ -4,6 +4,7 @@ function solution = Solve6DOFPointingConstrainedControlProblem(problemParameters
     % Not allowed to point at the origin
     % TODO: Turn this into a mex file
     % Date: 18 Oct 2024
+    useCodeGen = false; 
     if nargin < 3, skipSol = false; end
     if isempty(gcp), parpool(8); end
     problemParameters.dynamics.finalT = solverParameters.tSpan(end);
@@ -11,7 +12,19 @@ function solution = Solve6DOFPointingConstrainedControlProblem(problemParameters
         problemParameters.dynamics,solverParameters.initialCostateGuess);
     if skipSol % We may want to get experimental with guesses of lam0, This spits out the error with a particular lam0, without doing any solving
         lam0=initialGuess; exitFlag = -1;
-    else
+    elseif useCodeGen
+        [lam0,exitFlag] = SolveFunc_SixDOF_CW_CodeGen(solverParameters.tSpan, problemParameters.x0, problemParameters.xf,...
+        problemParameters.p0,problemParameters.pf,...
+        problemParameters.w0,problemParameters.wf,...
+        solverParameters.rho,...
+        problemParameters.constraint.type, problemParameters.constraint.targetRadius, problemParameters.constraint.epsilon,...
+        1, problemParameters.dynamics.inertia, problemParameters.dynamics.inertiaInverse, ...
+        problemParameters.dynamics.frameRotationRate, problemParameters.dynamics.A, ...
+        problemParameters.dynamics.exhaustVelocity, problemParameters.dynamics.maxThrust, ...
+        problemParameters.dynamics.engineConfiguration, problemParameters.dynamics.numEngines, problemParameters.dynamics.engineLocationBody,problemParameters.dynamics.thrustDirectionBody,...
+        problemParameters.dynamics.attitudeActuator, problemParameters.dynamics.torqueCostMultiplier, 0,...
+        solverParameters.fSolveOptions,solverParameters.odeOptions);
+    else 
         [lam0,~,exitFlag] = fsolve(@costFunction,initialGuess,...
             solverParameters.fSolveOptions,...
             solverParameters.tSpan, problemParameters.x0, problemParameters.xf,...
@@ -21,7 +34,7 @@ function solution = Solve6DOFPointingConstrainedControlProblem(problemParameters
             problemParameters.constraint,...
             problemParameters.dynamics,remainingCostates, ...
             solverParameters.odeOptions,false);
-    end
+    end 
     solution = emptySolutionStruct(problemParameters,solverParameters);
     solution.newCostateGuess = CombineIgnoredCostates(problemParameters.dynamics, lam0, remainingCostates); 
     if solverParameters.getTraj
@@ -86,6 +99,8 @@ function [initialGuess,remainingCostates] = ChooseCostatesToIgnore(dynamics, cos
     else 
         initialGuess = costateGuess;
         remainingCostates = [];
+        %initialGuess = costateGuess([1,2,4:13]);
+        %remainingCostates =  costateGuess(3);
     end
 end
 
@@ -98,6 +113,7 @@ function lam0 = CombineIgnoredCostates(dynamics, costateGuess, costatesToIgnore)
         end
     else
         lam0 = costateGuess;
+        %lam0 = [costateGuess(1:2);costatesToIgnore;costateGuess(3:end)];
     end
 end
 
